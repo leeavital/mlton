@@ -139,8 +139,6 @@ datatype Context = Context of {
     chunkLabelIndex: ChunkLabel.t -> int,
     labelChunk: Label.t -> ChunkLabel.t,
     entryLabels: Label.t vector,
-    labelInfo: Label.t -> {chunkLabel: ChunkLabel.t,
-                           frameIndex: int option},
     printblock: bool,
     printstmt: bool,
     printmove: bool
@@ -1516,7 +1514,6 @@ fun makeContext program =
                   chunkLabelToString = chunkLabelToString,
                   labelChunk = labelChunk,
                   entryLabels = entryLabels,
-                  labelInfo = labelInfo,
                   printblock = !Control.Native.commented > 0,
                   printstmt = !Control.Native.commented > 1,
                   printmove = !Control.Native.commented > 2
@@ -1537,7 +1534,7 @@ fun transC (cxt, outputC) =
         val Context { program, ... } = cxt
         val {print, done, file=_} = outputC ()
         val Program.T {main = main, chunks = chunks, ... } = program
-        val Context { chunkLabelToString, labelToStringIndex, entryLabels, labelInfo, ... } = cxt
+        val Context { chunkLabelToString, entryLabels, labelChunk, labelToStringIndex, ... } = cxt
         val chunkLabel = chunkLabelToString (#chunkLabel main)
         val mainLabel = labelToStringIndex (#label main)
         val additionalMainArgs = [chunkLabel, mainLabel]
@@ -1550,11 +1547,10 @@ fun transC (cxt, outputC) =
             ; print "PRIVATE struct cont ( *nextChunks []) () = {\n"
             ; Vector.foreach (entryLabels, fn l =>
                              let
-                                 val {chunkLabel, ...} = labelInfo l
                              in
                                  print "\t"
                                ; C.callNoSemi ("Chunkp",
-                                               [chunkLabelToString chunkLabel],
+                                               [chunkLabelToString (labelChunk l)],
                                                print)
                                ; print ",\n"
                              end)
