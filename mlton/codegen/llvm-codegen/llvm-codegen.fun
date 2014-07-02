@@ -11,14 +11,47 @@ open S
 
 open Machine
 
-local
-    open Runtime
-in
-    structure GCField = GCField
-end
-
 datatype z = datatype RealSize.t
 datatype z = datatype WordSize.prim
+
+local
+   open Runtime
+in
+   structure GCField = GCField
+end
+
+structure Kind =
+   struct
+      open Kind
+
+      fun isEntry (k: t): bool =
+         case k of
+            Cont _ => true
+          | CReturn {func, ...} => CFunction.mayGC func
+          | Func => true
+          | Handler _ => true
+          | _ => false
+   end
+
+structure C =
+   struct
+      fun args (ss: string list): string
+         = concat ("(" :: List.separate (ss, ", ") @ [")"])
+
+      fun callNoSemi (f: string, xs: string list, print: string -> unit): unit
+         = (print f
+            ; print " ("
+            ; (case xs
+                  of [] => ()
+                | x :: xs => (print x
+                              ; List.foreach (xs,
+                                             fn x => (print ", "; print x))))
+            ; print ")")
+
+      fun call (f, xs, print) =
+         (callNoSemi (f, xs, print)
+          ; print ";\n")
+   end
 
 (* LLVM codegen context. Contains various values/functions that should
    be shared amongst all codegen functions. *)
@@ -1446,16 +1479,9 @@ fun makeContext program =
            let
               fun entry (index: int) =
                  List.push (entryLabels, (label, index))
-              fun kindIsEntry kind =
-                  case kind of
-                      Kind.Cont _ => true
-                    | Kind.CReturn {func, ...} => CFunction.mayGC func
-                    | Kind.Func => true
-                    | Kind.Handler _ => true
-                    | _ => false
               val frameIndex =
                  case Kind.frameInfoOpt kind of
-                    NONE => (if kindIsEntry kind
+                    NONE => (if Kind.isEntry kind
                                 then entry (Counter.next indexCounter)
                              else ()
                              ; NONE)
@@ -1521,22 +1547,10 @@ fun transC (cxt, outputC) =
         val chunkLabel = chunkLabelToString (#chunkLabel main)
         val mainLabel = labelToStringIndex (#label main)
         val additionalMainArgs = [chunkLabel, mainLabel]
-        fun callNoSemi (f: string, xs: string list, print: string -> unit): unit
-            = (print f
-              ; print " ("
-              ; (case xs
-                  of [] => ()
-                   | x :: xs => (print x
-                                ; List.foreach (xs,
-                                                fn x => (print ", "; print x))))
-              ; print ")")
-        fun ccall (f, xs, print) =
-            (callNoSemi (f, xs, print)
-            ; print ";\n")
         fun declareChunk (Chunk.T {chunkLabel, ...}, print) =
-            ccall ("DeclareChunk",
-                 [chunkLabelToString chunkLabel],
-                 print)
+            C.call ("DeclareChunk",
+                    [chunkLabelToString chunkLabel],
+                    print)
         fun rest () =
             (List.foreach (chunks, fn c => declareChunk (c, print))
             ; print "PRIVATE struct cont ( *nextChunks []) () = {\n"
@@ -1545,9 +1559,9 @@ fun transC (cxt, outputC) =
                                  val {chunkLabel, ...} = labelInfo l
                              in
                                  print "\t"
-                               ; callNoSemi ("Chunkp",
-                                             [chunkLabelToString chunkLabel],
-                                             print)
+                               ; C.callNoSemi ("Chunkp",
+                                               [chunkLabelToString chunkLabel],
+                                               print)
                                ; print ",\n"
                              end)
             ; print "};\n")
@@ -1571,4 +1585,3 @@ fun output {program, outputC, outputLL} =
     end
 
 end
-
