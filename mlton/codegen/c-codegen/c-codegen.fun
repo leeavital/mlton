@@ -1,4 +1,4 @@
-(* Copyright (C) 2009 Matthew Fluet.
+(* Copyright (C) 2009,2014 Matthew Fluet.
  * Copyright (C) 1999-2008 Henry Cejtin, Matthew Fluet, Suresh
  *    Jagannathan, and Stephen Weeks.
  * Copyright (C) 1997-2000 NEC Research Institute.
@@ -35,8 +35,6 @@ structure Kind =
           | Handler _ => true
           | _ => false
    end
-
-val traceGotoLabel = Trace.trace ("CCodegen.gotoLabel", Label.layout, Unit.layout)
 
 structure RealX =
    struct
@@ -123,20 +121,6 @@ structure C =
          call ("\tPush", [bytes size], print)
    end
 
-structure Operand =
-   struct
-      open Operand
-
-      fun isMem (z: t): bool =
-         case z of
-            ArrayOffset _ => true
-          | Cast (z, _) => isMem z
-          | Contents _ => true
-          | Offset _ => true
-          | StackOffset _ => true
-          | _ => false
-   end
-
 fun implementsPrim (p: 'a Prim.t): bool =
    let
       datatype z = datatype Prim.Name.t
@@ -203,9 +187,6 @@ fun implementsPrim (p: 'a Prim.t): bool =
        | Word_xorb _ => true
        | _ => false
    end
-
-fun creturn (t: Type.t): string =
-   concat ["CReturn", CType.name (Type.toCType t)]
 
 fun outputIncludes (includes, print) =
    (print "#define _ISOC99_SOURCE\n"
@@ -495,7 +476,19 @@ structure StackOffset =
          concat ["S", C.args [Type.toC ty, C.bytes offset]]
    end
 
-fun contents (ty, z) = concat ["C", C.args [Type.toC ty, z]]
+structure Operand =
+   struct
+      open Operand
+
+      fun isMem (z: t): bool =
+         case z of
+            ArrayOffset _ => true
+          | Cast (z, _) => isMem z
+          | Contents _ => true
+          | Offset _ => true
+          | StackOffset _ => true
+          | _ => false
+   end
 
 fun declareFFI (Chunk.T {blocks, ...}, {print: string -> unit}) =
    let
@@ -664,6 +657,7 @@ fun output {program as Machine.Program.T {chunks,
             concat [dst, " = ", src, ";\n"]
       local
          datatype z = datatype Operand.t
+         fun contents (ty, z) = concat ["C", C.args [Type.toC ty, z]]
          fun toString (z: Operand.t): string =
             case z of
                ArrayOffset {base, index, offset, scale, ty} =>
@@ -834,6 +828,8 @@ fun output {program as Machine.Program.T {chunks,
                 ; if amTimeProfiling
                      then print "\tFlushStackTop();\n"
                   else ())
+            fun creturn (t: Type.t): string =
+               concat ["CReturn", CType.name (Type.toCType t)]
             fun copyArgs (args: Operand.t vector): string list * (unit -> unit) =
                let
                   fun usesStack z =
@@ -879,6 +875,11 @@ fun output {program as Machine.Program.T {chunks,
                   else (Vector.toListMap (args, fetchOperand),
                         fn () => ())
                end
+            val traceGotoLabel =
+               Trace.trace
+               ("CCodegen.gotoLabel",
+                Label.layout,
+                Unit.layout)
             val tracePrintLabelCode =
                Trace.trace
                ("CCodegen.printLabelCode",
