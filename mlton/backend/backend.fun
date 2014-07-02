@@ -1,4 +1,4 @@
-(* Copyright (C) 2009,2013 Matthew Fluet.
+(* Copyright (C) 2009,2013-2014 Matthew Fluet.
  * Copyright (C) 1999-2008 Henry Cejtin, Matthew Fluet, Suresh
  *    Jagannathan, and Stephen Weeks.
  * Copyright (C) 1997-2000 NEC Research Institute.
@@ -319,8 +319,8 @@ let
                   end
             in
                (* We need to give each frame its own layout index in two cases.
-                * 1. If we are using the C codegen, in which case we want the
-                *    indices in a chunk to be consecutive integers so that gcc
+                * 1. If we are using the C or LLVM codegen, in which case we want the
+                *    indices in a chunk to be consecutive integers so that gcc/llc
                 *    will use a jump table.
                 * 2. If we are profiling, we want every frame to have a
                 *    different index so that it can have its own profiling info.
