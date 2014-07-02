@@ -53,6 +53,83 @@ structure C =
           ; print ";\n")
    end
 
+fun implementsPrim (p: 'a Prim.t): bool =
+   let
+      datatype z = datatype Prim.Name.t
+   in
+      case Prim.name p of
+         CPointer_add => true
+       | CPointer_diff => true
+       | CPointer_equal => true
+       | CPointer_fromWord => true
+       | CPointer_lt => true
+       | CPointer_sub => true
+       | CPointer_toWord => true
+       | FFI_Symbol _ => true
+       | Real_Math_acos _ => false
+       | Real_Math_asin _ => false
+       | Real_Math_atan _ => false
+       | Real_Math_atan2 _ => false
+       | Real_Math_cos _ => true
+       | Real_Math_exp _ => true
+       | Real_Math_ln _ => true
+       | Real_Math_log10 _ => true
+       | Real_Math_sin _ => true
+       | Real_Math_sqrt _ => true
+       | Real_Math_tan _ => false
+       | Real_abs _ => true (* Requires LLVM 3.2 to use "llvm.fabs" intrinsic *)
+       | Real_add _ => true
+       | Real_castToWord _ => true
+       | Real_div _ => true
+       | Real_equal _ => true
+       | Real_ldexp _ => false
+       | Real_le _ => true
+       | Real_lt _ => true
+       | Real_mul _ => true
+       | Real_muladd _ => true
+       | Real_mulsub _ => true
+       | Real_neg _ => true
+       | Real_qequal _ => true
+       | Real_rndToReal _ => true
+       | Real_rndToWord _ => true
+       | Real_round _ => true (* Requires LLVM 3.3 to use "llvm.rint" intrinsic *)
+       | Real_sub _ => true
+       | Thread_returnToC => false
+       | Word_add _ => true
+       | Word_addCheck _ => true
+       | Word_andb _ => true
+       | Word_castToReal _ => true
+       | Word_equal _ => true
+       | Word_extdToWord _ => true
+       | Word_lshift _ => true
+       | Word_lt _ => true
+       | Word_mul _ => true
+       | Word_mulCheck (ws, _) =>
+            (case (!Control.Target.arch, ws) of
+                (Control.Target.X86, ws) =>
+                   (* @llvm.smul.with.overflow.i64 becomes a call to __mulodi4.
+                    * @llvm.umul.with.overflow.i64 becomes a call to __udivdi3.
+                    * These are provided by compiler-rt and not always by libgcc.
+                    * In any case, do not depend on non-standard libraries.
+                    *)
+                   not (WordSize.equals (ws, WordSize.word64))
+              | _ => true)
+       | Word_neg _ => true
+       | Word_negCheck _ => true
+       | Word_notb _ => true
+       | Word_orb _ => true
+       | Word_quot _ => true
+       | Word_rem _ => true
+       | Word_rndToReal _ => true
+       | Word_rol _ => true
+       | Word_ror _ => true
+       | Word_rshift _ => true
+       | Word_sub _ => true
+       | Word_subCheck _ => true
+       | Word_xorb _ => true
+       | _ => false
+   end
+
 (* LLVM codegen context. Contains various values/functions that should
    be shared amongst all codegen functions. *)
 datatype Context = Context of {
@@ -139,83 +216,6 @@ val globalDeclarations =
 \@returnToC = external hidden global i32\n\
 \@nextChunks = external hidden global [0 x void (%struct.cont*)*]\n\
 \@gcState = external hidden global %struct.GC_state\n"
-
-fun implementsPrim (p: 'a Prim.t): bool =
-   let
-      datatype z = datatype Prim.Name.t
-   in
-      case Prim.name p of
-         CPointer_add => true
-       | CPointer_diff => true
-       | CPointer_equal => true
-       | CPointer_fromWord => true
-       | CPointer_lt => true
-       | CPointer_sub => true
-       | CPointer_toWord => true
-       | FFI_Symbol _ => true
-       | Real_Math_acos _ => false
-       | Real_Math_asin _ => false
-       | Real_Math_atan _ => false
-       | Real_Math_atan2 _ => false
-       | Real_Math_cos _ => true
-       | Real_Math_exp _ => true
-       | Real_Math_ln _ => true
-       | Real_Math_log10 _ => true
-       | Real_Math_sin _ => true
-       | Real_Math_sqrt _ => true
-       | Real_Math_tan _ => false
-       | Real_abs _ => true (* Requires LLVM 3.2 to use "llvm.fabs" intrinsic *)
-       | Real_add _ => true
-       | Real_castToWord _ => true
-       | Real_div _ => true
-       | Real_equal _ => true
-       | Real_ldexp _ => false
-       | Real_le _ => true
-       | Real_lt _ => true
-       | Real_mul _ => true
-       | Real_muladd _ => true
-       | Real_mulsub _ => true
-       | Real_neg _ => true
-       | Real_qequal _ => true
-       | Real_rndToReal _ => true
-       | Real_rndToWord _ => true
-       | Real_round _ => true (* Requires LLVM 3.3 to use "llvm.rint" intrinsic *)
-       | Real_sub _ => true
-       | Thread_returnToC => false
-       | Word_add _ => true
-       | Word_addCheck _ => true
-       | Word_andb _ => true
-       | Word_castToReal _ => true
-       | Word_equal _ => true
-       | Word_extdToWord _ => true
-       | Word_lshift _ => true
-       | Word_lt _ => true
-       | Word_mul _ => true
-       | Word_mulCheck (ws, _) =>
-            (case (!Control.Target.arch, ws) of
-                (Control.Target.X86, ws) =>
-                   (* @llvm.smul.with.overflow.i64 becomes a call to __mulodi4.
-                    * @llvm.umul.with.overflow.i64 becomes a call to __udivdi3.
-                    * These are provided by compiler-rt and not always by libgcc.
-                    * In any case, do not depend on non-standard libraries.
-                    *)
-                   not (WordSize.equals (ws, WordSize.word64))
-              | _ => true)
-       | Word_neg _ => true
-       | Word_negCheck _ => true
-       | Word_notb _ => true
-       | Word_orb _ => true
-       | Word_quot _ => true
-       | Word_rem _ => true
-       | Word_rndToReal _ => true
-       | Word_rol _ => true
-       | Word_ror _ => true
-       | Word_rshift _ => true
-       | Word_sub _ => true
-       | Word_subCheck _ => true
-       | Word_xorb _ => true
-       | _ => false
-   end
 
 (* WordX.toString converts to hexadecimal, this converts to base 10 *)
 fun llwordx (w: WordX.t) =
