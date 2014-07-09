@@ -1132,11 +1132,16 @@ fun emitChunk {context, chunk, outputLL} =
                   val (baseTy, baseReg) = operandToValue base
                   val (indexTy, indexReg) = operandToValue index
                   val indexScale = LLVM.Reg.tmp ()
-                  val () = print (mkinst (indexScale, "mul", indexTy, indexReg, Scale.toString scale))
+                  val () = print (mkinst (indexScale,
+                                          "mul", indexTy,
+                                          indexReg, Scale.toString scale))
                   val indexScalePlusOffset = LLVM.Reg.tmp ()
-                  val () = print (mkinst (indexScalePlusOffset, "add", indexTy, indexScale, llbytes offset))
+                  val () = print (mkinst (indexScalePlusOffset,
+                                          "add", indexTy,
+                                          indexScale, llbytes offset))
                   val ptr = LLVM.Reg.tmp ()
-                  val () = print (mkgep (ptr, baseTy, baseReg, [(indexTy, indexScalePlusOffset)]))
+                  val () = print (mkgep (ptr, baseTy, baseReg,
+                                         [(indexTy, indexScalePlusOffset)]))
                   val resTy = llty ty
                   val res = LLVM.Reg.tmp ()
                   val () = print (mkconv (res, "bitcast", baseTy, ptr, resTy ^ "*"))
@@ -1166,7 +1171,8 @@ fun emitChunk {context, chunk, outputLL} =
                      else "@globalObjptrNonRoot"
                   val resTy = llty globalTy
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkgep (res, globalArrTy ^ "*", globalArrPtr, [("i32", "0"), ("i32", Int.toString globalIdx)]))
+                  val () = print (mkgep (res, globalArrTy ^ "*", globalArrPtr,
+                                         [("i32", "0"), ("i32", Int.toString globalIdx)]))
                in
                   (resTy, res)
                end
@@ -1186,7 +1192,8 @@ fun emitChunk {context, chunk, outputLL} =
                   val regTy = Register.ty reg
                   val regIdx = Register.index reg
                   val resTy = llty regTy
-                  val res = concat ["%reg", CType.name (Type.toCType regTy), "_", Int.toString regIdx]
+                  val res = concat ["%reg", CType.name (Type.toCType regTy),
+                                    "_", Int.toString regIdx]
                in
                   (resTy, res)
                end
