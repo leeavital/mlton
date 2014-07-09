@@ -1117,7 +1117,7 @@ fun emitChunk {context, chunk, outputLL} =
       val () = cFunctions := []
       val () = ffiSymbols := []
 
-      val Context { labelToStringIndex, chunkLabelIndex, labelChunk,
+      val Context {labelToStringIndex, chunkLabelIndex, labelChunk,
                    chunkLabelToString, entryLabels, program, ... } = context
 
       val Chunk.T {blocks, chunkLabel, regMax} = chunk
@@ -1125,18 +1125,16 @@ fun emitChunk {context, chunk, outputLL} =
       val {done, print, file = _} = outputLL ()
       val prints = fn ss => List.foreach (ss, print)
 
-(*
-      fun operandToAddrReg oper = =
+      fun operandToAddr oper =
          case oper of
             Operand.ArrayOffset {base, index, offset, scale, ty} =>
                let
-                  (* arrayoffset = base + (index * scale) + offset *)
-                  val (baseTy, baseReg) = operandToValueReg base
-                  val (indexTy, indexReg) = operandToValueReg index
+                  val (baseTy, baseReg) = operandToValue base
+                  val (indexTy, indexReg) = operandToValue index
                   val indexScale = LLVM.Reg.tmp ()
-                  val () = print (mkinst (indexScale, "mul nsw", indexTy, indexReg, Scale.toString scale))
+                  val () = print (mkinst (indexScale, "mul", indexTy, indexReg, Scale.toString scale))
                   val indexScalePlusOffset = LLVM.Reg.tmp ()
-                  val () = print (mkinst (indexScalePlusOffset, "add nsw", indexTy, indexScale, llbytes offset))
+                  val () = print (mkinst (indexScalePlusOffset, "add", indexTy, indexScale, llbytes offset))
                   val ptr = LLVM.Reg.tmp ()
                   val () = print (mkgep (ptr, baseTy, baseReg, [(indexTy, indexScalePlusOffset)]))
                   val resTy = llty ty
@@ -1147,34 +1145,34 @@ fun emitChunk {context, chunk, outputLL} =
                end
           | Operand.Contents {oper, ty} =>
                let
-                  val (operTy, operReg) = operandToAddrReg oper
+                  val (operTy, operReg) = operandToAddr oper
                   val tmp = LLVM.Reg.tmp ()
                   val () = print (mkload (tmp, operTy ^ "*", operReg))
                   val resTy = llty ty
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkconv (res, "bitcast", operTy, tmp, llvmTy ^ "*"))
+                  val () = print (mkconv (res, "bitcast", operTy, tmp, resTy ^ "*"))
                in
                   (resTy, res)
                end
           | Operand.Frontier => ("%Pointer", "%frontier")
           | Operand.Global global =>
                let
-                  val globalType = Global.ty global
-                  val globalIsRoot = Global.isRoot global
-                  val globalIndex = Global.index global
-                  val llvmTy = llty globalType
-                  val ty = typeOfGlobal global
-                  val globalID = if globalIsRoot
-                                    then "@global" ^ CType.toString (Type.toCType globalType)
-                                 else "@globalObjptrNonRoot"
-                  val ptr = LLVM.Reg.tmp ()
-                  val gep = mkgep (ptr, ty ^ "*", globalID, [("i32", "0"), ("i32", llint globalIndex)])
+                  val globalTy = Global.ty global
+                  val globalIdx = Global.index global
+                  val globalArrTy = typeOfGlobal global
+                  val globalArrPtr =
+                     if Global.isRoot global
+                        then concat ["@global", CType.toString (Type.toCType globalTy)]
+                     else "@globalObjptrNonRoot"
+                  val resTy = llty globalTy
+                  val res = LLVM.Reg.tmp ()
+                  val () = print (mkgep (res, globalArrTy ^ "*", globalArrPtr, [("i32", "0"), ("i32", Int.toString globalIdx)]))
                in
-                  (gep, llvmTy, ptr)
+                  (resTy, res)
                end
           | Operand.Offset {base, offset, ty} =>
                let
-                  val (baseTy, baseReg) = operandToValueReg base
+                  val (baseTy, baseReg) = operandToValue base
                   val ptr = LLVM.Reg.tmp ()
                   val () = print (mkgep (ptr, baseTy, baseReg, [("i32", llbytes offset)]))
                   val resTy = llty ty
@@ -1183,54 +1181,50 @@ fun emitChunk {context, chunk, outputLL} =
                in
                   (resTy, res)
                end
-          | Operand.Register register =>
+          | Operand.Register reg =>
                let
-                  val regty = Register.ty register
-                  val reg = regName (Type.toCType regty, Register.index register)
-                  val resTy = llty regty
+                  val regTy = Register.ty reg
+                  val regIdx = Register.index reg
+                  val resTy = llty regTy
+                  val res = concat ["%reg", CType.name (Type.toCType regTy), "_", Int.toString regIdx]
                in
-                  (resTy, reg)
+                  (resTy, res)
                end
           | Operand.StackOffset stackOffset =>
                let
                   val StackOffset.T {offset, ty} = stackOffset
-                  val idx = llbytes offset
-                  val stackTop = LLVM.Reg.tmp ()
-                  val load = mkload (stackTop, "%Pointer*", "%stackTop")
-                  val gepReg = LLVM.Reg.tmp ()
-                  val gep = mkgep (gepReg, "%Pointer", stackTop, [("i32", idx)])
-                  val llvmTy = llty ty
-                  val reg = LLVM.Reg.tmp ()
-                  val cast = mkconv (reg, "bitcast", "%Pointer", gepReg, llvmTy ^ "*")
+                  val (_, stackTop) = operandToValue (Operand.StackTop)
+                  val ptr = LLVM.Reg.tmp ()
+                  val () = print (mkgep (ptr, "%Pointer", stackTop, [("i32", llbytes offset)]))
+                  val resTy = llty ty
+                  val res = LLVM.Reg.tmp ()
+                  val () = print (mkconv (res, "bitcast", "%Pointer", ptr, resTy ^ "*"))
                in
-                  (concat [load, gep, cast], llvmTy, reg)
+                  (resTy, res)
                end
           | Operand.StackTop => ("%Pointer", "%stackTop")
-          | _ => Error.bug ("LLVMCodegen.emitChunk.operandToAddrReg: " ^ Operand.toString operand)
+          | _ => Error.bug ("LLVMCodegen.emitChunk.operandToAddr: " ^ Operand.toString oper)
 
-      (* ty is the type of the value *)
-      and getOperandValue (cxt, operand) =
+      and operandToValue oper =
          let
-            fun loadOperand () =
+            fun loadOper () =
                let
-                  val (pre, ty, addr) = getOperandAddr (cxt, operand)
-                  val reg = LLVM.Reg.tmp ()
-                  val load = mkload (reg, ty ^ "*", addr)
+                  val (resTy, addrReg) = operandToAddr oper
+                  val res = LLVM.Reg.tmp ()
+                  val () = print (mkload (res, resTy ^ "*", addrReg))
                in
-                  (pre ^ load, ty, reg)
+                  (resTy, res)
                end
-            val Context { labelToStringIndex, ... } = cxt
          in
-            case operand of
-               Operand.ArrayOffset _ => loadOperand ()
+            case oper of
+               Operand.ArrayOffset _ => loadOper ()
              | Operand.Cast (oper, ty) =>
                   let
-                     val (operPre, operTy, operReg) =
-                        getOperandValue (cxt, oper)
-                     val llvmTy = llty ty
-                     val reg = LLVM.Reg.tmp ()
-                     fun isIntType cty =
-                        case cty of
+                     val (operTy, operReg) = operandToValue oper
+                     val resTy = llty ty
+                     val res = LLVM.Reg.tmp ()
+                     fun isIntTy ty =
+                        case Type.toCType ty of
                            CType.Int8 => true
                          | CType.Int16 => true
                          | CType.Int32 => true
@@ -1240,56 +1234,64 @@ fun emitChunk {context, chunk, outputLL} =
                          | CType.Word32 => true
                          | CType.Word64 => true
                          | _ => false
-                     fun isPtrType cty = case cty of
-                        CType.CPointer => true
-                      | CType.Objptr => true
-                      | _ => false
-                     val operIsInt = (isIntType o Type.toCType o Operand.ty) oper
-                     val operIsPtr = (isPtrType o Type.toCType o Operand.ty) oper
-                     val tyIsInt = (isIntType o Type.toCType) ty
-                     val tyIsPtr = (isPtrType o Type.toCType) ty
-                     val operation =
-                        if operIsInt andalso tyIsPtr
+                     fun isPtrTy ty =
+                        case Type.toCType ty of
+                           CType.CPointer => true
+                         | CType.Objptr => true
+                         | _ => false
+                     val operIsIntTy = (isIntTy o Operand.ty) oper
+                     val operIsPtrTy = (isPtrTy o Operand.ty) oper
+                     val resIsIntTy = isIntTy ty
+                     val resIsPtrTy = isPtrTy ty
+                     val instr =
+                        if operIsIntTy andalso resIsPtrTy
                            then "inttoptr"
-                        else if operIsPtr andalso tyIsInt
+                        else if operIsPtrTy andalso resIsIntTy
                            then "ptrtoint"
                         else "bitcast"
-                     val inst = mkconv (reg, operation, operTy, operReg, llvmTy)
+                     val () = print (mkconv (res, instr, operTy, operReg, resTy))
                   in
-                     (concat [operPre, inst], llvmTy, reg)
+                     (resTy, res)
                   end
-             | Operand.Contents _ => loadOperand ()
-             | Operand.Frontier => loadOperand ()
+             | Operand.Contents _ => loadOper ()
+             | Operand.Frontier => loadOper ()
              | Operand.GCState =>
                   let
-                     val reg = LLVM.Reg.tmp ()
-                     val cast = mkconv (reg, "bitcast", "%struct.GC_state*", "@gcState", "%Pointer")
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkconv (res, "bitcast", "%struct.GC_state*", "@gcState", "%Pointer"))
                   in
-                     (cast, "%Pointer", reg)
+                     ("%Pointer", res)
                   end
-             | Operand.Global _ => loadOperand ()
+             | Operand.Global _ => loadOper ()
              | Operand.Label label =>
                   let
-                     val reg = LLVM.Reg.tmp ()
-                     val cast = mkconv (reg, "inttoptr", "%Word32", labelToStringIndex label,
-                                        "%CPointer")
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkconv (res, "inttoptr", "%Word32", labelToStringIndex label, "%CPointer"))
                   in
-                     (cast, "%CPointer", reg)
+                     ("%CPointer", res)
                   end
-             | Operand.Null => ("", "i8*", "null")
-             | Operand.Offset _ => loadOperand ()
-             | Operand.Real real => ("", (llrs o RealX.size) real, RealX.toString real)
-             | Operand.Register  _ => loadOperand ()
-             | Operand.StackOffset _ => loadOperand ()
-             | Operand.StackTop => loadOperand()
+             | Operand.Null => ("i8*", "null")
+             | Operand.Offset _ => loadOper ()
+             | Operand.Real real =>
+                  let
+                     val resTy = llrs (RealX.size real)
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkconv (res, "bitcast", resTy, RealX.toString real, resTy))
+                  in
+                     (resTy, res)
+                  end
+             | Operand.Register  _ => loadOper ()
+             | Operand.StackOffset _ => loadOper ()
+             | Operand.StackTop => loadOper ()
              | Operand.Word word =>
                   let
-
+                     val resTy = llws (WordX.size word)
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkconv (res, "bitcast", resTy, llwordx word, resTy))
                   in
-                     ("", (llws o WordX.size) word, llwordx word)
-                  in
+                     (resTy, res)
+                  end
          end
-*)
 
       fun emitStatement stmt =
          let
@@ -1301,11 +1303,11 @@ fun emitChunk {context, chunk, outputLL} =
                case stmt of
                   Statement.Move {dst, src} =>
                      let
-                        val (srcpre, _, srcreg) = getOperandValue (context, src)
-                        val (dstpre, dstty, dstreg) = getOperandAddr (context, dst)
-                        val store = mkstore (dstty, srcreg, dstreg)
+                        val (_, srcReg) = operandToValue src
+                        val (dstTy, dstReg) = operandToAddr dst
+                        val () = print (mkstore (dstTy, srcReg, dstReg))
                      in
-                        prints [srcpre, dstpre, store]
+                        ()
                      end
                 | Statement.Noop => print "\t; Noop\n"
                 | Statement.PrimApp p => print (outputPrimApp (context, p))
