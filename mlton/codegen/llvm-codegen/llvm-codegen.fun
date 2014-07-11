@@ -1407,7 +1407,7 @@ fun emitChunk {context, chunk, outputLL} =
                             | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
                         val ty = "%CPointer"
                         val res = LLVM.Reg.tmp ()
-                        val inst = mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer")
+                        val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer"))
                      in
                         res
                      end
@@ -1434,8 +1434,8 @@ fun emitChunk {context, chunk, outputLL} =
 (*
                 | Real_ldexp _ => false
 *)
-                | Real_le _ => doCmp "fole"
-                | Real_lt _ => doCmp "folt"
+                | Real_le _ => doCmp "fcmp ole"
+                | Real_lt _ => doCmp "fcmp olt"
                 | Real_mul _ => doBinAL "fmul"
                 | Real_muladd rs => doMathCall ("fma", rs)
                 | Real_mulsub rs =>
