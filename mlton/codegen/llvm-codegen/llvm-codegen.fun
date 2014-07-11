@@ -876,7 +876,7 @@ fun outputPrimApp (cxt, p) =
         concat [arg0pre, arg1pre, cast, arg2pre, inst, storeDest]
     end
 
-fun outputTransfer (cxt, transfer, sourceLabel) =
+fun outputTransfer (cxt, transfer, srcChunk) =
     let
         val comment = concat ["\t; ", Layout.toString (Transfer.layout transfer), "\n"]
         val Context { labelToStringIndex = labelToStringIndex,
@@ -1005,7 +1005,7 @@ fun outputTransfer (cxt, transfer, sourceLabel) =
                 val push = case return of
                                NONE => ""
                              | SOME {return, size, ...} => transferPush (return, size)
-                val goto = if ChunkLabel.equals (labelChunk sourceLabel, dstChunk)
+                val goto = if ChunkLabel.equals (srcChunk, dstChunk)
                            then concat ["\tbr label %", labelstr, "\n"]
                            else let
                                val comment = "\t; FarJump\n"
@@ -1308,60 +1308,62 @@ fun emitChunk {context, chunk, outputLL} =
 
             fun doBinAL instr =
                let
+                  val resTy = argTy 0
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, argTy 0, argReg 0, argReg 1))
+                  val () = print (mkinst (res, instr, resTy, argReg 0, argReg 1))
                in
-                  res
+                  (resTy, res)
                end
             fun doCmp instr =
                let
-                  val tmp = doBinAL instr
+                  val (tmpTy, tmp) = doBinAL instr
+                  val resTy = "%Word32"
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkconv (res, "zext", "i1", tmp, "%Word32"))
+                  val () = print (mkconv (res, "zext", tmpTy, tmp, resTy))
                in
-                  res
+                  (resTy, res)
                end
-            fun doConv (conv, ty) =
+            fun doConv (conv, resTy) =
                let
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkconv (res, conv, argTy 0, argReg 0, ty))
+                  val () = print (mkconv (res, conv, argTy 0, argReg 0, resTy))
                in
-                  res
+                  (resTy, res)
                end
-            fun doCall (call, ty, args) =
+            fun doCall (call, resTy, args) =
                let
                   val res = LLVM.Reg.tmp ()
                   val args = Vector.toListMap (args, fn (argTy, argReg) => argTy ^ " " ^ argReg)
                   val args = String.concatWith (args, ",")
-                  val () = prints ["\t", res, " = call ", ty, " ", call,
+                  val () = prints ["\t", res, " = call ", resTy, " ", call,
                                    "(", args, ")\n"]
                in
-                  res
-               end
-            fun doMathCall (call, rs) =
-               let val rs = RealSize.toString rs
-               in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
+                  (resTy, res)
                end
             fun doCheckCall (call, ws) =
                let val ws = WordSize.toString ws
                in doCall ("@llvm." ^ call ^ ".with.overflow.i" ^ ws, "{%Word" ^ ws ^ ",i1}", args)
+               end
+            fun doMathCall (call, rs) =
+               let val rs = RealSize.toString rs
+               in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
                end
             datatype z = datatype Prim.Name.t
          in
             case Prim.name prim of
                CPointer_add =>
                   let
+                     val resTy = argTy 0
                      val res = LLVM.Reg.tmp ()
-                     val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, argReg 1)]))
+                     val () = print (mkgep (res, argTy 0, argReg 0, [arg 1]))
                   in
-                     res
+                     (resTy, res)
                   end
              | CPointer_diff =>
                   let
-                     val ty = "%Word" ^ (WordSize.toString (WordSize.cpointer ()))
                      val tmp0 = emitPrimApp {args = Vector.new1 (arg 0), prim = Prim.cpointerToWord}
                      val tmp1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.cpointerToWord}
-                     val res = emitPrimApp {args = Vector.new2 ((ty, tmp0), (ty, tmp1)), prim = Prim.wordSub (WordSize.cptrdiff ())}
+                     val res = emitPrimApp {args = Vector.new2 (tmp0, tmp1), prim = Prim.wordSub (WordSize.cptrdiff ())}
                   in
                      res
                   end
@@ -1371,7 +1373,7 @@ fun emitChunk {context, chunk, outputLL} =
              | CPointer_sub =>
                   let
                      val tmp = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordNeg (WordSize.cptrdiff ())}
-                     val res = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmp)), prim = Prim.cpointerAdd}
+                     val res = emitPrimApp {args = Vector.new2 (arg 0, tmp), prim = Prim.cpointerAdd}
                   in
                      res
                   end
@@ -1383,11 +1385,11 @@ fun emitChunk {context, chunk, outputLL} =
                         case cty of
                            SOME cty => "%" ^ CType.toString cty
                          | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
-                     val ty = "%CPointer"
+                     val resTy = "%CPointer"
                      val res = LLVM.Reg.tmp ()
-                     val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer"))
+                     val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, resTy))
                   in
-                     res
+                     (resTy, res)
                   end
              (*
              | Real_Math_acos _ => false
@@ -1419,7 +1421,7 @@ fun emitChunk {context, chunk, outputLL} =
              | Real_mulsub rs =>
                   let
                      val tmp = emitPrimApp {args = Vector.new1 (arg 2), prim = Prim.realNeg rs}
-                     val res = emitPrimApp {args = Vector.new3 (arg 0, arg 1, (argTy 2, tmp)), prim = Prim.realMulAdd rs}
+                     val res = emitPrimApp {args = Vector.new3 (arg 0, arg 1, tmp), prim = Prim.realMulAdd rs}
                   in
                      res
                   end
@@ -1464,10 +1466,11 @@ fun emitChunk {context, chunk, outputLL} =
              | Word_lshift ws =>
                   let
                      val arg1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordExtdToWord (WordSize.shiftArg, ws, {signed = false})}
+                     val resTy = argTy 0
                      val res = LLVM.Reg.tmp ()
-                     val () = print (mkinst (res, "shl", argTy 0, argReg 0, arg1))
+                     val () = print (mkinst (res, "shl", resTy, argReg 0, #2 arg1))
                   in
-                     res
+                     (resTy, res)
                   end
              | Word_lt (_, {signed}) => doCmp (if signed then "icmp slt" else "icmp ult")
              | Word_mul _ => doBinAL "mul"
@@ -1483,9 +1486,9 @@ fun emitChunk {context, chunk, outputLL} =
                   let
                      (* (arg0 >> (size - arg1)) | (arg0 << arg1) *)
                      val tmpA = emitPrimApp {args = Vector.new2 ((argTy 1, WordSize.toString ws), arg 1), prim = Prim.wordSub WordSize.shiftArg}
-                     val tmpB = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmpA)), prim = Prim.wordRshift (ws, {signed = false})}
+                     val tmpB = emitPrimApp {args = Vector.new2 (arg 0, tmpA), prim = Prim.wordRshift (ws, {signed = false})}
                      val tmpC = emitPrimApp {args = Vector.new2 (arg 0, arg 1), prim = Prim.wordLshift ws}
-                     val res = emitPrimApp {args = Vector.new2 ((argTy 0, tmpB), (argTy 0, tmpC)), prim = Prim.wordOrb ws}
+                     val res = emitPrimApp {args = Vector.new2 (tmpB, tmpC), prim = Prim.wordOrb ws}
                   in
                      res
                   end
@@ -1495,18 +1498,19 @@ fun emitChunk {context, chunk, outputLL} =
                      val tmpA = emitPrimApp {args = Vector.new2 (arg 0, arg 1), prim = Prim.wordRshift (ws, {signed = false})}
 
                      val tmpB = emitPrimApp {args = Vector.new2 ((argTy 1, WordSize.toString ws), arg 1), prim = Prim.wordSub WordSize.shiftArg}
-                     val tmpC = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmpB)), prim = Prim.wordLshift ws}
-                     val res = emitPrimApp {args = Vector.new2 ((argTy 0, tmpA), (argTy 0, tmpC)), prim = Prim.wordOrb ws}
+                     val tmpC = emitPrimApp {args = Vector.new2 (arg 0, tmpB), prim = Prim.wordLshift ws}
+                     val res = emitPrimApp {args = Vector.new2 (tmpA, tmpC), prim = Prim.wordOrb ws}
                   in
                      res
                   end
              | Word_rshift (ws, {signed}) =>
                   let
                      val arg1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordExtdToWord (WordSize.shiftArg, ws, {signed = false})}
+                     val resTy = argTy 0
                      val res = LLVM.Reg.tmp ()
-                     val () = print (mkinst (res, if signed then "ashr" else "lshr", argTy 0, argReg 0, arg1))
+                     val () = print (mkinst (res, if signed then "ashr" else "lshr", resTy, argReg 0, #2 arg1))
                   in
-                     res
+                     (resTy, res)
                   end
              | Word_sub _ => doBinAL "sub"
              | Word_subCheck (ws, {signed}) => doCheckCall (if signed then "ssub" else "usub", ws)
@@ -1514,43 +1518,73 @@ fun emitChunk {context, chunk, outputLL} =
              | _ => Error.bug ("LLVMCodegen.emitChunk.emitPrimApp" ^ (Prim.toString prim))
          end
 
-      fun emitStatement stmt =
+      fun emitStatement statement =
          let
             val () =
                if !Control.Native.commented > 1
-                  then prints ["\t; ", Layout.toString (Statement.layout stmt), "\n"]
+                  then prints ["\t; ", Layout.toString (Statement.layout statement), "\n"]
                else ()
-            val () =
-               case stmt of
-                  Statement.Move {dst, src} =>
-                     let
-                        val (_, srcReg) = operandToValue src
-                        val (dstTy, dstReg) = operandToAddr dst
-                        val () = print (mkstore (dstTy, srcReg, dstReg))
-                     in
-                        ()
-                     end
-                | Statement.Noop => print "\t; Noop\n"
-                | Statement.PrimApp {args, dst, prim} =>
-                     let
-                        val args = Vector.map (args, operandToValue)
-                        val res = emitPrimApp {args = args, prim = prim}
-                        val () =
-                           Option.app
-                           (dst, fn dst =>
-                            let
-                               val (dstTy, dstReg) = operandToAddr dst
-                               val () = print (mkstore (dstTy, res, dstReg))
-                            in
-                               ()
-                            end)
-                     in
-                        ()
-                     end
-                | Statement.ProfileLabel _ =>
-                     Error.bug "LLVMCodegen.emitChunk.emitStatement: ProfileLabel"
          in
-            ()
+            case statement of
+               Statement.Move {dst, src} =>
+                  let
+                     val (_, srcReg) = operandToValue src
+                     val (dstTy, dstReg) = operandToAddr dst
+                  in
+                     print (mkstore (dstTy, srcReg, dstReg))
+                  end
+             | Statement.Noop => print "\t; Noop\n"
+             | Statement.PrimApp {args, dst, prim} =>
+                  let
+                     val args = Vector.map (args, operandToValue)
+                     val (_, resReg) = emitPrimApp {args = args, prim = prim}
+                  in
+                     Option.app
+                     (dst, fn dst =>
+                      let
+                         val (dstTy, dstReg) = operandToAddr dst
+                      in
+                         print (mkstore (dstTy, resReg, dstReg))
+                      end)
+                  end
+             | Statement.ProfileLabel _ =>
+                  Error.bug "LLVMCodegen.emitChunk.emitStatement: ProfileLabel"
+         end
+
+      fun emitTransfer transfer =
+         let
+            val () =
+               if !Control.Native.commented > 1
+                  then prints ["\t; ", Layout.toString (Transfer.layout transfer), "\n"]
+               else ()
+         in
+            case transfer of
+               Transfer.Arith {args, dst, overflow, prim, success} =>
+                  let
+                     val args = Vector.map (args, operandToValue)
+                     val (ty, res_obit) = emitPrimApp {args = args, prim = prim}
+                     val resReg = LLVM.Reg.tmp ()
+                     val () = prints ["\t", resReg, " = extractvalue ", ty, " ", res_obit, ", 0\n"]
+                     val obitReg = LLVM.Reg.tmp ()
+                     val () = prints ["\t", obitReg, " = extractvalue ", ty, " ", res_obit, ", 1\n"]
+                     val (dstTy, dstReg) = operandToAddr dst
+                     val () = print (mkstore (dstTy, resReg, dstReg))
+                  in
+                     prints ["\tbr i1 ", obitReg, ", ",
+                             "label %", Label.toString overflow, ", ",
+                             "label %", Label.toString success, "\n"]
+                  end
+             | Transfer.Goto label =>
+                  prints ["\tbr label %", Label.toString label, "\n"]
+(*
+             | Transfer.Switch (Switch.T {cases, default, test, ...}) =>
+                  let
+                     val (testTy, testReg) = operandToValue test
+                  in
+                     ()
+                  end
+*)
+             | _ => print (outputTransfer (context, transfer, chunkLabel))
          end
 
       fun emitBlock block =
@@ -1588,7 +1622,7 @@ fun emitChunk {context, chunk, outputLL} =
                 | _ => ()
 
             val () = Vector.foreach (statements, emitStatement)
-            val () = print (outputTransfer (context, transfer, label))
+            val () = emitTransfer transfer
          in
             ()
          end
