@@ -1,4 +1,5 @@
-(* Copyright (C) 2004-2007 Henry Cejtin, Matthew Fluet, Suresh
+(* Copyright (C) 2014 Matthew Fluet.
+ * Copyright (C) 2004-2007 Henry Cejtin, Matthew Fluet, Suresh
  *    Jagannathan, and Stephen Weeks.
  *
  * MLton is released under a BSD-style license.
@@ -18,6 +19,7 @@ signature REAL_SIZE =
       val all: t list
       val bits: t -> Bits.t
       val bytes: t -> Bytes.t
+      val compare: t * t -> Relation.t
       val equals: t * t -> bool
       val memoize: (t -> 'a) -> t -> 'a
       val toString: t -> string

@@ -1300,37 +1300,16 @@ fun emitChunk {context, chunk, outputLL} =
                   end
          end
 
-      fun emitPrimApp {args, dst, prim} =
+      fun emitPrimApp {args, prim} =
          let
-            val args = Vector.map (args, operandToValue)
-            val argTy = fn i => #1 (Vector.sub (args, i))
-            val argReg = fn i => #2 (Vector.sub (args, i))
+            val arg = fn i => Vector.sub (args, i)
+            val argTy = #1 o arg
+            val argReg = #2 o arg
 
-            fun doUnAL (instr, argOther) =
-               let
-                  val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, argTy 0, argOther, argReg 0))
-               in
-                  res
-               end
             fun doBinAL instr =
                let
                   val res = LLVM.Reg.tmp ()
                   val () = print (mkinst (res, instr, argTy 0, argReg 0, argReg 1))
-               in
-                  res
-               end
-            fun doShift (ws, instr) =
-               let
-                  val tmp = LLVM.Reg.tmp ()
-                  val conv =
-                     case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                        LESS => "zext"
-                      | EQUAL => "bitcast"
-                      | GREATER => "trunc"
-                  val () = print (mkconv (tmp, conv, "%Word32", argReg 1, argTy 0))
-                  val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, argTy 0, argReg 0, tmp))
                in
                   res
                end
@@ -1363,211 +1342,176 @@ fun emitChunk {context, chunk, outputLL} =
                let val rs = RealSize.toString rs
                in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
                end
+            fun doCheckCall (call, ws) =
+               let val ws = WordSize.toString ws
+               in doCall ("@llvm." ^ call ^ ".with.overflow.i" ^ ws, "{%Word" ^ ws ^ ",i1}", args)
+               end
             datatype z = datatype Prim.Name.t
-            val res =
-               case Prim.name prim of
-                  CPointer_add =>
-                     let
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, argReg 1)]))
-                     in
-                        res
-                     end
-                | CPointer_diff =>
-                     let
-                        val ty = "%Word" ^ (Bits.toString (Control.Target.Size.cpointer ()))
-                        val tmp0 = LLVM.Reg.tmp ()
-                        val () = print (mkconv (tmp0, "ptrtoint", argTy 0, argReg 0, ty))
-                        val tmp1 = LLVM.Reg.tmp ()
-                        val () = print (mkconv (tmp1, "ptrtoint", argTy 1, argReg 1, ty))
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkinst (res, "sub", ty, tmp0, tmp1))
-                     in
-                        res
-                     end
-                | CPointer_equal => doCmp "icmp eq"
-                | CPointer_fromWord => doConv ("inttoptr", "%CPointer")
-                | CPointer_lt => doCmp "icmp ult"
-                | CPointer_sub =>
-                     let
-                        val tmp = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp, "sub", argTy 1, "0", argReg 1))
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, tmp)]))
-                     in
-                        res
-                     end
-                | CPointer_toWord => doConv ("ptrtoint", "%Word" ^ (Bits.toString (Control.Target.Size.cpointer ())))
-                | FFI_Symbol (s as {name, cty, ...}) =>
-                     let
-                        val () = addFfiSymbol s
-                        val symTy =
-                           case cty of
-                              SOME cty => "%" ^ CType.toString cty
-                            | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
-                        val ty = "%CPointer"
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer"))
-                     in
-                        res
-                     end
-(*
-                | Real_Math_acos _ => false
-                | Real_Math_asin _ => false
-                | Real_Math_atan _ => false
-                | Real_Math_atan2 _ => false
-*)
-                | Real_Math_cos rs => doMathCall ("cos", rs)
-                | Real_Math_exp rs => doMathCall ("exp", rs)
-                | Real_Math_ln rs => doMathCall ("log", rs)
-                | Real_Math_log10 rs => doMathCall ("log10", rs)
-                | Real_Math_sin rs => doMathCall ("sin", rs)
-                | Real_Math_sqrt rs => doMathCall ("sqrt", rs)
-(*
-                | Real_Math_tan _ => false
-*)
-                | Real_abs rs => doMathCall ("fabs", rs)
-                | Real_add _ => doBinAL "fadd"
-                | Real_castToWord (_, ws) => doConv ("bitcast", "%Word" ^ (WordSize.toString ws))
-                | Real_div _ => doBinAL "fdiv"
-                | Real_equal _ => doCmp "foeq"
-(*
-                | Real_ldexp _ => false
-*)
-                | Real_le _ => doCmp "fcmp ole"
-                | Real_lt _ => doCmp "fcmp olt"
-                | Real_mul _ => doBinAL "fmul"
-                | Real_muladd rs => doMathCall ("fma", rs)
-                | Real_mulsub rs =>
-                     let
-                        val ty = argTy 0
-                        val tmp = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp, "fsub", ty, "-0.0", argReg 2))
-                        val args = Vector.new3 ((ty, argReg 0), (ty, argReg 1), (ty, tmp))
-                     in
-                        doCall ("@llvm.fma.f" ^ (RealSize.toString rs), ty, args)
-                     end
-                | Real_neg _ => doUnAL ("fsub", "-0.0")
-                | Real_qequal _ => doCmp "fcmp ueq"
-                | Real_rndToReal (rs1, rs2) =>
-                     let
-                        val conv =
-                           case Bits.compare (RealSize.bits rs1, RealSize.bits rs2) of
-                              LESS => "fpext"
-                            | EQUAL => "bitcast"
-                            | GREATER => "fptrunc"
-                     in
-                        doConv (conv, "%Real" ^ (RealSize.toString rs2))
-                     end
-                | Real_rndToWord (rs, ws, {signed}) =>
-                     let
-                        val conv = if signed then "fptosi" else "fptoui"
-                     in
-                        doConv (conv, "%Word" ^ (WordSize.toString ws))
-                     end
-                | Real_round rs => doMathCall ("rint", rs)
-                | Real_sub _ => doBinAL "fsub"
-(*
-                | Thread_returnToC => false
-*)
-                | Word_add _ => doBinAL "add"
-(*
-                | Word_addCheck _ => true
-*)
-                | Word_andb _ => doBinAL "and"
-                | Word_castToReal (ws, rs) => doConv ("bitcast", "%Real" ^ (RealSize.toString rs))
-                | Word_equal _ => doCmp "icmp eq"
-                | Word_extdToWord (ws1, ws2, {signed}) =>
-                     let
-                        val conv =
-                           case WordSize.compare (ws1, ws2) of
-                              LESS => if signed then "sext" else "zext"
-                            | EQUAL => "bitcast"
-                            | GREATER => "trunc"
-                     in
-                        doConv (conv, "%Word" ^ (WordSize.toString ws2))
-                     end
-                | Word_lshift ws => doShift (ws, "shl")
-                | Word_lt (_, {signed}) => doCmp (if signed then "icmp slt" else "icmp ult")
-                | Word_mul _ => doBinAL "mul"
-(*
-                | Word_mulCheck _ => true
-*)
-                | Word_neg _ => doUnAL ("sub", "0")
-(*
-                | Word_negCheck _ => true
-*)
-                | Word_notb _ => doUnAL ("xor", "-1")
-                | Word_orb _ => doBinAL "or"
-                | Word_quot (_, {signed}) => doBinAL (if signed then "sdiv" else "udiv")
-                | Word_rem (_, {signed}) => doBinAL (if signed then "srem" else "urem")
-                | Word_rndToReal (ws, rs, {signed}) => doConv (if signed then "sitofp" else "uitofp", "%Real" ^ (RealSize.toString rs))
-                | Word_rol ws =>
-                     let
-                        val ty = argTy 0
-                        val arg0 = argReg 0
-                        val conv =
-                           case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                              LESS => "zext"
-                            | EQUAL => "bitcast"
-                            | GREATER => "trunc"
-                        val arg1 = LLVM.Reg.tmp ()
-                        val () = print (mkconv (arg1, conv, "%Word32", argReg 1, ty))
-                        (* (arg0 >> (size - arg1)) | (arg0 << arg1) *)
-                        val tmp1 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp1, "sub", ty, WordSize.toString ws, arg1))
-                        val tmp2 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp2, "lshr", ty, arg0, tmp1))
-                        val tmp3 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp3, "shl", ty, arg0, arg1))
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkinst (res, "or", ty, tmp2, tmp3))
-                     in
-                        res
-                     end
-                | Word_ror ws =>
-                     let
-                        val ty = argTy 0
-                        val arg0 = argReg 0
-                        val conv =
-                           case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                              LESS => "zext"
-                            | EQUAL => "bitcast"
-                            | GREATER => "trunc"
-                        val arg1 = LLVM.Reg.tmp ()
-                        val () = print (mkconv (arg1, conv, "%Word32", argReg 1, ty))
-                        (* (arg0 >> arg1) | (arg0 << (size - arg1)) *)
-                        val tmp1 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp1, "lshr", ty, arg0, arg1))
-                        val tmp2 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp2, "sub", ty, WordSize.toString ws, arg1))
-                        val tmp3 = LLVM.Reg.tmp ()
-                        val () = print (mkinst (tmp3, "shl", ty, arg0, tmp2))
-                        val res = LLVM.Reg.tmp ()
-                        val () = print (mkinst (res, "or", ty, tmp1, tmp3))
-                     in
-                        res
-                     end
-                | Word_rshift (ws, {signed}) => doShift (ws, if signed then "ashr" else "lshr")
-                | Word_sub _ => doBinAL "sub"
-(*
-                | Word_subCheck _ => true
-*)
-                | Word_xorb _ => doBinAL "xor"
-                | _ => Error.bug ("LLVMCodegen.emitChunk.emitPrimApp" ^ (Prim.toString prim))
-
-            val () =
-               case dst of
-                  NONE => ()
-                | SOME dst =>
-                     let
-                        val (dstTy, dstReg) = operandToAddr dst
-                        val () = print (mkstore (dstTy, res, dstReg))
-                     in
-                        ()
-                     end
          in
-            ()
+            case Prim.name prim of
+               CPointer_add =>
+                  let
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, argReg 1)]))
+                  in
+                     res
+                  end
+             | CPointer_diff =>
+                  let
+                     val ty = "%Word" ^ (WordSize.toString (WordSize.cpointer ()))
+                     val tmp0 = emitPrimApp {args = Vector.new1 (arg 0), prim = Prim.cpointerToWord}
+                     val tmp1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.cpointerToWord}
+                     val res = emitPrimApp {args = Vector.new2 ((ty, tmp0), (ty, tmp1)), prim = Prim.wordSub (WordSize.cptrdiff ())}
+                  in
+                     res
+                  end
+             | CPointer_equal => doCmp "icmp eq"
+             | CPointer_fromWord => doConv ("inttoptr", "%CPointer")
+             | CPointer_lt => doCmp "icmp ult"
+             | CPointer_sub =>
+                  let
+                     val tmp = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordNeg (WordSize.cptrdiff ())}
+                     val res = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmp)), prim = Prim.cpointerAdd}
+                  in
+                     res
+                  end
+             | CPointer_toWord => doConv ("ptrtoint", "%Word" ^ (WordSize.toString (WordSize.cpointer ())))
+             | FFI_Symbol (s as {name, cty, ...}) =>
+                  let
+                     val () = addFfiSymbol s
+                     val symTy =
+                        case cty of
+                           SOME cty => "%" ^ CType.toString cty
+                         | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
+                     val ty = "%CPointer"
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer"))
+                  in
+                     res
+                  end
+             (*
+             | Real_Math_acos _ => false
+             | Real_Math_asin _ => false
+             | Real_Math_atan _ => false
+             | Real_Math_atan2 _ => false
+             *)
+             | Real_Math_cos rs => doMathCall ("cos", rs)
+             | Real_Math_exp rs => doMathCall ("exp", rs)
+             | Real_Math_ln rs => doMathCall ("log", rs)
+             | Real_Math_log10 rs => doMathCall ("log10", rs)
+             | Real_Math_sin rs => doMathCall ("sin", rs)
+             | Real_Math_sqrt rs => doMathCall ("sqrt", rs)
+             (*
+             | Real_Math_tan _ => false
+             *)
+             | Real_abs rs => doMathCall ("fabs", rs)
+             | Real_add _ => doBinAL "fadd"
+             | Real_castToWord (_, ws) => doConv ("bitcast", "%Word" ^ (WordSize.toString ws))
+             | Real_div _ => doBinAL "fdiv"
+             | Real_equal _ => doCmp "fcmp oeq"
+             (*
+             | Real_ldexp _ => false
+             *)
+             | Real_le _ => doCmp "fcmp ole"
+             | Real_lt _ => doCmp "fcmp olt"
+             | Real_mul _ => doBinAL "fmul"
+             | Real_muladd rs => doMathCall ("fma", rs)
+             | Real_mulsub rs =>
+                  let
+                     val tmp = emitPrimApp {args = Vector.new1 (arg 2), prim = Prim.realNeg rs}
+                     val res = emitPrimApp {args = Vector.new3 (arg 0, arg 1, (argTy 2, tmp)), prim = Prim.realMulAdd rs}
+                  in
+                     res
+                  end
+             | Real_neg rs => emitPrimApp {args = Vector.new2 ((argTy 0, "-0.0"), arg 0), prim = Prim.realSub rs}
+             | Real_qequal _ => doCmp "fcmp ueq"
+             | Real_rndToReal (rs1, rs2) =>
+                  let
+                     val conv =
+                        case RealSize.compare (rs1, rs2) of
+                           LESS => "fpext"
+                         | EQUAL => "bitcast"
+                         | GREATER => "fptrunc"
+                  in
+                     doConv (conv, "%Real" ^ (RealSize.toString rs2))
+                  end
+             | Real_rndToWord (rs, ws, {signed}) =>
+                  let
+                     val conv = if signed then "fptosi" else "fptoui"
+                  in
+                     doConv (conv, "%Word" ^ (WordSize.toString ws))
+                  end
+             | Real_round rs => doMathCall ("rint", rs)
+             | Real_sub _ => doBinAL "fsub"
+             (*
+             | Thread_returnToC => false
+             *)
+             | Word_add _ => doBinAL "add"
+             | Word_addCheck (ws, {signed}) => doCheckCall (if signed then "sadd" else "uadd", ws)
+             | Word_andb _ => doBinAL "and"
+             | Word_castToReal (ws, rs) => doConv ("bitcast", "%Real" ^ (RealSize.toString rs))
+             | Word_equal _ => doCmp "icmp eq"
+             | Word_extdToWord (ws1, ws2, {signed}) =>
+                  let
+                     val conv =
+                        case WordSize.compare (ws1, ws2) of
+                           LESS => if signed then "sext" else "zext"
+                         | EQUAL => "bitcast"
+                         | GREATER => "trunc"
+                  in
+                     doConv (conv, "%Word" ^ (WordSize.toString ws2))
+                  end
+             | Word_lshift ws =>
+                  let
+                     val arg1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordExtdToWord (WordSize.shiftArg, ws, {signed = false})}
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkinst (res, "shl", argTy 0, argReg 0, arg1))
+                  in
+                     res
+                  end
+             | Word_lt (_, {signed}) => doCmp (if signed then "icmp slt" else "icmp ult")
+             | Word_mul _ => doBinAL "mul"
+             | Word_mulCheck (ws, {signed}) => doCheckCall (if signed then "smul" else "umul", ws)
+             | Word_neg ws => emitPrimApp {args = Vector.new2 ((argTy 0, "0"), arg 0), prim = Prim.wordSub ws}
+             | Word_negCheck ws => emitPrimApp {args = Vector.new2 ((argTy 0, "0"), arg 0), prim = Prim.wordSubCheck (ws, {signed = true})}
+             | Word_notb ws => emitPrimApp {args = Vector.new2 ((argTy 0, "-1"), arg 0), prim = Prim.wordXorb ws}
+             | Word_orb _ => doBinAL "or"
+             | Word_quot (_, {signed}) => doBinAL (if signed then "sdiv" else "udiv")
+             | Word_rem (_, {signed}) => doBinAL (if signed then "srem" else "urem")
+             | Word_rndToReal (ws, rs, {signed}) => doConv (if signed then "sitofp" else "uitofp", "%Real" ^ (RealSize.toString rs))
+             | Word_rol ws =>
+                  let
+                     (* (arg0 >> (size - arg1)) | (arg0 << arg1) *)
+                     val tmpA = emitPrimApp {args = Vector.new2 ((argTy 1, WordSize.toString ws), arg 1), prim = Prim.wordSub WordSize.shiftArg}
+                     val tmpB = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmpA)), prim = Prim.wordRshift (ws, {signed = false})}
+                     val tmpC = emitPrimApp {args = Vector.new2 (arg 0, arg 1), prim = Prim.wordLshift ws}
+                     val res = emitPrimApp {args = Vector.new2 ((argTy 0, tmpB), (argTy 0, tmpC)), prim = Prim.wordOrb ws}
+                  in
+                     res
+                  end
+             | Word_ror ws =>
+                  let
+                     (* (arg0 >> arg1) | (arg0 << (size - arg1)) *)
+                     val tmpA = emitPrimApp {args = Vector.new2 (arg 0, arg 1), prim = Prim.wordRshift (ws, {signed = false})}
+
+                     val tmpB = emitPrimApp {args = Vector.new2 ((argTy 1, WordSize.toString ws), arg 1), prim = Prim.wordSub WordSize.shiftArg}
+                     val tmpC = emitPrimApp {args = Vector.new2 (arg 0, (argTy 1, tmpB)), prim = Prim.wordLshift ws}
+                     val res = emitPrimApp {args = Vector.new2 ((argTy 0, tmpA), (argTy 0, tmpC)), prim = Prim.wordOrb ws}
+                  in
+                     res
+                  end
+             | Word_rshift (ws, {signed}) =>
+                  let
+                     val arg1 = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordExtdToWord (WordSize.shiftArg, ws, {signed = false})}
+                     val res = LLVM.Reg.tmp ()
+                     val () = print (mkinst (res, if signed then "ashr" else "lshr", argTy 0, argReg 0, arg1))
+                  in
+                     res
+                  end
+             | Word_sub _ => doBinAL "sub"
+             | Word_subCheck (ws, {signed}) => doCheckCall (if signed then "ssub" else "usub", ws)
+             | Word_xorb _ => doBinAL "xor"
+             | _ => Error.bug ("LLVMCodegen.emitChunk.emitPrimApp" ^ (Prim.toString prim))
          end
 
       fun emitStatement stmt =
@@ -1587,7 +1531,22 @@ fun emitChunk {context, chunk, outputLL} =
                         ()
                      end
                 | Statement.Noop => print "\t; Noop\n"
-                | Statement.PrimApp prim => emitPrimApp prim
+                | Statement.PrimApp {args, dst, prim} =>
+                     let
+                        val args = Vector.map (args, operandToValue)
+                        val res = emitPrimApp {args = args, prim = prim}
+                        val () =
+                           Option.app
+                           (dst, fn dst =>
+                            let
+                               val (dstTy, dstReg) = operandToAddr dst
+                               val () = print (mkstore (dstTy, res, dstReg))
+                            in
+                               ()
+                            end)
+                     in
+                        ()
+                     end
                 | Statement.ProfileLabel _ =>
                      Error.bug "LLVMCodegen.emitChunk.emitStatement: ProfileLabel"
          in
@@ -1637,7 +1596,7 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "\n"
       (* C-Types *)
       val () = print "; c-types\n"
-      val () = prints ["%uintptr_t = type i", Bits.toString (Control.Target.Size.cpointer ()), "\n"]
+      val () = prints ["%uintptr_t = type i", WordSize.toString (WordSize.cpointer ()), "\n"]
       val () = print "\n"
       (* ML-Types *)
       val () = print "; ml-types\n"
@@ -1660,9 +1619,9 @@ fun emitChunk {context, chunk, outputLL} =
       val () = List.foreach
                (WordSize.prims, fn ws =>
                 let
-                   val b = Bits.toString (WordSize.bits ws)
-                   val ty = "%Word" ^ b
-                   val operTy = "i" ^ b
+                   val ws = WordSize.toString ws
+                   val ty = "%Word" ^ ws
+                   val operTy = "i" ^ ws
                    fun emitOverflow oper =
                       prints ["declare {", ty, ", i1} ",
                               "@llvm.", oper, ".with.overflow.", operTy,
@@ -1674,9 +1633,9 @@ fun emitChunk {context, chunk, outputLL} =
       val () = List.foreach
                (RealSize.all, fn rs =>
                 let
-                   val b = Bits.toString (RealSize.bits rs)
-                   val ty = "%Real" ^ b
-                   val operTy = "f" ^ b
+                   val rs = RealSize.toString rs
+                   val ty = "%Real" ^ rs
+                   val operTy = "f" ^ rs
                    fun emitOp (oper, arity) =
                       let
                          val () = prints ["declare ", ty, " @llvm.", oper, ".", operTy, "("]

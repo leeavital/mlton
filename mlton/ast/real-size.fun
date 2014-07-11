@@ -1,4 +1,5 @@
-(* Copyright (C) 2004-2007 Henry Cejtin, Matthew Fluet, Suresh
+(* Copyright (C) 2014 Matthew Fluet.
+ * Copyright (C) 2004-2007 Henry Cejtin, Matthew Fluet, Suresh
  *    Jagannathan, and Stephen Weeks.
  *
  * MLton is released under a BSD-style license.
@@ -35,5 +36,7 @@ val bytes: t -> Bytes.t =
     | R64 => Bytes.fromInt 8
 
 val bits: t -> Bits.t = Bytes.toBits o bytes
+
+fun compare (s, s') = Bits.compare (bits s, bits s')
 
 end

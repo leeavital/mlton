@@ -1,4 +1,4 @@
-(* Copyright (C) 2009-2010 Matthew Fluet.
+(* Copyright (C) 2009-2010,2014 Matthew Fluet.
  * Copyright (C) 1999-2008 Henry Cejtin, Matthew Fluet, Suresh
  *    Jagannathan, and Stephen Weeks.
  * Copyright (C) 1997-2000 NEC Research Institute.
@@ -721,6 +721,9 @@ val intInfToWord = IntInf_toWord
 val intInfNeg = IntInf_neg
 val intInfNotb = IntInf_notb
 val realCastToWord = Real_castToWord
+val realMulAdd = Real_muladd
+val realNeg = Real_neg
+val realSub = Real_sub
 val reff = Ref_ref
 val touch = MLton_touch
 val vectorLength = Vector_length
@@ -741,6 +744,7 @@ val wordOrb = Word_orb
 val wordQuot = Word_quot
 val wordRshift = Word_rshift
 val wordSub = Word_sub
+val wordSubCheck = Word_subCheck
 val wordXorb = Word_xorb
 
 val isCommutative =
