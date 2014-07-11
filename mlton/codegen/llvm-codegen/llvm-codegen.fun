@@ -1656,7 +1656,7 @@ fun emitChunk {context, chunk, outputLL} =
                        "%Objptr = type %Pointer\n"]
       val () = print "\n"
       (* LLVM Intrinsics *)
-      val () = print "; llvm intrinsics"
+      val () = print "; llvm intrinsics\n"
       val () = List.foreach
                (WordSize.prims, fn ws =>
                 let
