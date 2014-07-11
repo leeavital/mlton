@@ -1308,51 +1308,48 @@ fun emitChunk {context, chunk, outputLL} =
 
             fun doUnAL (instr, argOther) =
                let
-                  val ty = argTy 0
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, ty, argOther, argReg 0))
+                  val () = print (mkinst (res, instr, argTy 0, argOther, argReg 0))
                in
-                  (ty, res)
+                  res
                end
             fun doBinAL instr =
                let
-                  val ty = argTy 0
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, ty, argReg 0, argReg 1))
+                  val () = print (mkinst (res, instr, argTy 0, argReg 0, argReg 1))
                in
-                  (ty, res)
+                  res
                end
             fun doShift (ws, instr) =
                let
-                  val ty = argTy 0
                   val tmp = LLVM.Reg.tmp ()
                   val conv =
                      case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                        LESS => "trunc"
+                        LESS => "zext"
                       | EQUAL => "bitcast"
-                      | GREATER => "zext"
-                  val () = print (mkconv (tmp, conv, "%Word32", argReg 1, ty))
+                      | GREATER => "trunc"
+                  val () = print (mkconv (tmp, conv, "%Word32", argReg 1, argTy 0))
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkinst (res, instr, ty, argReg 0, argReg 1))
+                  val () = print (mkinst (res, instr, argTy 0, argReg 0, tmp))
                in
-                  (ty, res)
+                  res
                end
             fun doCmp instr =
                let
-                  val (ty, tmp) = doBinAL instr
+                  val tmp = doBinAL instr
                   val res = LLVM.Reg.tmp ()
                   val () = print (mkconv (res, "zext", "i1", tmp, "%Word32"))
                in
-                  ("%Word32", res)
+                  res
                end
             fun doConv (conv, ty) =
                let
                   val res = LLVM.Reg.tmp ()
                   val () = print (mkconv (res, conv, argTy 0, argReg 0, ty))
                in
-                  (ty, res)
+                  res
                end
-            fun doCall (call, ty) =
+            fun doCall (call, ty, args) =
                let
                   val res = LLVM.Reg.tmp ()
                   val args = Vector.toListMap (args, fn (argTy, argReg) => argTy ^ " " ^ argReg)
@@ -1360,28 +1357,61 @@ fun emitChunk {context, chunk, outputLL} =
                   val () = prints ["\t", res, " = call ", ty, " ", call,
                                    "(", args, ")\n"]
                in
-                  (ty, res)
+                  res
                end
             fun doMathCall (call, rs) =
                let val rs = RealSize.toString rs
-               in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs)
+               in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
                end
             datatype z = datatype Prim.Name.t
-            val (resTy, res) =
+            val res =
                case Prim.name prim of
-(*
-                  CPointer_add => true
-                | CPointer_diff => true
-*)
-                  CPointer_equal => doCmp "icmp ueq"
-                | CPointer_fromWord => doConv ("inttoptr", "%Pointer")
+                  CPointer_add =>
+                     let
+                        val res = LLVM.Reg.tmp ()
+                        val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, argReg 1)]))
+                     in
+                        res
+                     end
+                | CPointer_diff =>
+                     let
+                        val ty = "%Word" ^ (Bits.toString (Control.Target.Size.cpointer ()))
+                        val tmp0 = LLVM.Reg.tmp ()
+                        val () = print (mkconv (tmp0, "ptrtoint", argTy 0, argReg 0, ty))
+                        val tmp1 = LLVM.Reg.tmp ()
+                        val () = print (mkconv (tmp1, "ptrtoint", argTy 1, argReg 1, ty))
+                        val res = LLVM.Reg.tmp ()
+                        val () = print (mkinst (res, "sub", ty, tmp0, tmp1))
+                     in
+                        res
+                     end
+                | CPointer_equal => doCmp "icmp eq"
+                | CPointer_fromWord => doConv ("inttoptr", "%CPointer")
                 | CPointer_lt => doCmp "icmp ult"
-(*
-                | CPointer_sub => true
-*)
+                | CPointer_sub =>
+                     let
+                        val tmp = LLVM.Reg.tmp ()
+                        val () = print (mkinst (tmp, "sub", argTy 1, "0", argReg 1))
+                        val res = LLVM.Reg.tmp ()
+                        val () = print (mkgep (res, argTy 0, argReg 0, [(argTy 1, tmp)]))
+                     in
+                        res
+                     end
                 | CPointer_toWord => doConv ("ptrtoint", "%Word" ^ (Bits.toString (Control.Target.Size.cpointer ())))
+                | FFI_Symbol (s as {name, cty, ...}) =>
+                     let
+                        val () = addFfiSymbol s
+                        val symTy =
+                           case cty of
+                              SOME cty => "%" ^ CType.toString cty
+                            | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
+                        val ty = "%CPointer"
+                        val res = LLVM.Reg.tmp ()
+                        val inst = mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, "%CPointer")
+                     in
+                        res
+                     end
 (*
-                | FFI_Symbol _ => true
                 | Real_Math_acos _ => false
                 | Real_Math_asin _ => false
                 | Real_Math_atan _ => false
@@ -1408,9 +1438,15 @@ fun emitChunk {context, chunk, outputLL} =
                 | Real_lt _ => doCmp "folt"
                 | Real_mul _ => doBinAL "fmul"
                 | Real_muladd rs => doMathCall ("fma", rs)
-(*
-                | Real_mulsub rs => true
-*)
+                | Real_mulsub rs =>
+                     let
+                        val ty = argTy 0
+                        val tmp = LLVM.Reg.tmp ()
+                        val () = print (mkinst (tmp, "fsub", ty, "-0.0", argReg 2))
+                        val args = Vector.new3 ((ty, argReg 0), (ty, argReg 1), (ty, tmp))
+                     in
+                        doCall ("@llvm.fma.f" ^ (RealSize.toString rs), ty, args)
+                     end
                 | Real_neg _ => doUnAL ("fsub", "-0.0")
                 | Real_qequal _ => doCmp "fcmp ueq"
                 | Real_rndToReal (rs1, rs2) =>
@@ -1472,9 +1508,9 @@ fun emitChunk {context, chunk, outputLL} =
                         val arg0 = argReg 0
                         val conv =
                            case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                              LESS => "trunc"
+                              LESS => "zext"
                             | EQUAL => "bitcast"
-                            | GREATER => "zext"
+                            | GREATER => "trunc"
                         val arg1 = LLVM.Reg.tmp ()
                         val () = print (mkconv (arg1, conv, "%Word32", argReg 1, ty))
                         (* (arg0 >> (size - arg1)) | (arg0 << arg1) *)
@@ -1487,7 +1523,7 @@ fun emitChunk {context, chunk, outputLL} =
                         val res = LLVM.Reg.tmp ()
                         val () = print (mkinst (res, "or", ty, tmp2, tmp3))
                      in
-                        (ty, res)
+                        res
                      end
                 | Word_ror ws =>
                      let
@@ -1495,9 +1531,9 @@ fun emitChunk {context, chunk, outputLL} =
                         val arg0 = argReg 0
                         val conv =
                            case Bits.compare (Bits.inWord32, WordSize.bits ws) of
-                              LESS => "trunc"
+                              LESS => "zext"
                             | EQUAL => "bitcast"
-                            | GREATER => "zext"
+                            | GREATER => "trunc"
                         val arg1 = LLVM.Reg.tmp ()
                         val () = print (mkconv (arg1, conv, "%Word32", argReg 1, ty))
                         (* (arg0 >> arg1) | (arg0 << (size - arg1)) *)
@@ -1510,7 +1546,7 @@ fun emitChunk {context, chunk, outputLL} =
                         val res = LLVM.Reg.tmp ()
                         val () = print (mkinst (res, "or", ty, tmp1, tmp3))
                      in
-                        (ty, res)
+                        res
                      end
                 | Word_rshift (ws, {signed}) => doShift (ws, if signed then "ashr" else "lshr")
                 | Word_sub _ => doBinAL "sub"
@@ -1551,7 +1587,7 @@ fun emitChunk {context, chunk, outputLL} =
                         ()
                      end
                 | Statement.Noop => print "\t; Noop\n"
-                | Statement.PrimApp p => print (outputPrimApp (context, p))
+                | Statement.PrimApp prim => emitPrimApp prim
                 | Statement.ProfileLabel _ =>
                      Error.bug "LLVMCodegen.emitChunk.emitStatement: ProfileLabel"
          in
