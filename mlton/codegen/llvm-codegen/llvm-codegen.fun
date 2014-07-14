@@ -1125,6 +1125,8 @@ fun emitChunk {context, chunk, outputLL} =
       val {done, print, file = _} = outputLL ()
       val prints = fn ss => List.foreach (ss, print)
 
+      val unreachableLabel = Label.newString "unreachable"
+
       fun operandToAddr oper =
          case oper of
             Operand.ArrayOffset {base, index, offset, scale, ty} =>
@@ -1316,10 +1318,10 @@ fun emitChunk {context, chunk, outputLL} =
                end
             fun doCmp instr =
                let
-                  val (tmpTy, tmp) = doBinAL instr
+                  val (_, tmp) = doBinAL instr
                   val resTy = "%Word32"
                   val res = LLVM.Reg.tmp ()
-                  val () = print (mkconv (res, "zext", tmpTy, tmp, resTy))
+                  val () = print (mkconv (res, "zext", "i1", tmp, resTy))
                in
                   (resTy, res)
                end
@@ -1353,12 +1355,22 @@ fun emitChunk {context, chunk, outputLL} =
             case Prim.name prim of
                CPointer_add =>
                   let
+                     val tmp0 = emitPrimApp {args = Vector.new1 (arg 0), prim = Prim.cpointerToWord}
+                     val tmp = emitPrimApp {args = Vector.new2 (tmp0, arg 1), prim = Prim.wordAdd (WordSize.cptrdiff())}
+                     val res = emitPrimApp {args = Vector.new1 tmp, prim = Prim.cpointerFromWord}
+                  in
+                     res
+                  end
+(*
+               CPointer_add =>
+                  let
                      val resTy = argTy 0
                      val res = LLVM.Reg.tmp ()
                      val () = print (mkgep (res, argTy 0, argReg 0, [arg 1]))
                   in
                      (resTy, res)
                   end
+*)
              | CPointer_diff =>
                   let
                      val tmp0 = emitPrimApp {args = Vector.new1 (arg 0), prim = Prim.cpointerToWord}
@@ -1372,22 +1384,32 @@ fun emitChunk {context, chunk, outputLL} =
              | CPointer_lt => doCmp "icmp ult"
              | CPointer_sub =>
                   let
+                     val tmp0 = emitPrimApp {args = Vector.new1 (arg 0), prim = Prim.cpointerToWord}
+                     val tmp = emitPrimApp {args = Vector.new2 (tmp0, arg 1), prim = Prim.wordSub (WordSize.cptrdiff())}
+                     val res = emitPrimApp {args = Vector.new1 tmp, prim = Prim.cpointerFromWord}
+                  in
+                     res
+                  end
+(*
+             | CPointer_sub =>
+                  let
                      val tmp = emitPrimApp {args = Vector.new1 (arg 1), prim = Prim.wordNeg (WordSize.cptrdiff ())}
                      val res = emitPrimApp {args = Vector.new2 (arg 0, tmp), prim = Prim.cpointerAdd}
                   in
                      res
                   end
+*)
              | CPointer_toWord => doConv ("ptrtoint", "%Word" ^ (WordSize.toString (WordSize.cpointer ())))
              | FFI_Symbol (s as {name, cty, ...}) =>
                   let
                      val () = addFfiSymbol s
                      val symTy =
                         case cty of
-                           SOME cty => "%" ^ CType.toString cty
-                         | NONE => Error.bug ("ffi symbol is void function?") (* TODO *)
+                           SOME cty => "%" ^ CType.toString cty ^ "*"
+                         | NONE => "%CPointer"
                      val resTy = "%CPointer"
                      val res = LLVM.Reg.tmp ()
-                     val () = print (mkconv (res, "bitcast", symTy ^ "*", "@" ^ name, resTy))
+                     val () = print (mkconv (res, "bitcast", symTy, "@" ^ name, resTy))
                   in
                      (resTy, res)
                   end
@@ -1530,22 +1552,25 @@ fun emitChunk {context, chunk, outputLL} =
                   let
                      val (_, srcReg) = operandToValue src
                      val (dstTy, dstReg) = operandToAddr dst
+                     val () = print (mkstore (dstTy, srcReg, dstReg))
                   in
-                     print (mkstore (dstTy, srcReg, dstReg))
+                     ()
                   end
              | Statement.Noop => print "\t; Noop\n"
              | Statement.PrimApp {args, dst, prim} =>
                   let
                      val args = Vector.map (args, operandToValue)
                      val (_, resReg) = emitPrimApp {args = args, prim = prim}
+                     val () =
+                        Option.app
+                        (dst, fn dst =>
+                         let
+                            val (dstTy, dstReg) = operandToAddr dst
+                         in
+                            print (mkstore (dstTy, resReg, dstReg))
+                         end)
                   in
-                     Option.app
-                     (dst, fn dst =>
-                      let
-                         val (dstTy, dstReg) = operandToAddr dst
-                      in
-                         print (mkstore (dstTy, resReg, dstReg))
-                      end)
+                     ()
                   end
              | Statement.ProfileLabel _ =>
                   Error.bug "LLVMCodegen.emitChunk.emitStatement: ProfileLabel"
@@ -1557,6 +1582,64 @@ fun emitChunk {context, chunk, outputLL} =
                if !Control.Native.commented > 1
                   then prints ["\t; ", Layout.toString (Transfer.layout transfer), "\n"]
                else ()
+            fun push (return: Label.t, size: Bytes.t) =
+               let
+                  val () =
+                     (emitStatement o Statement.Move)
+                     {dst = Operand.stackOffset
+                            {offset = Bytes.- (size, Runtime.labelSize ()),
+                             ty = Type.label return},
+                      src = Operand.Label return}
+                  val () = print (stackPush (llbytes size))
+                  val () =
+                     if !Control.profile = Control.ProfileTimeField
+                        then print (flushStackTop ())
+                     else ()
+               in
+                  ()
+               end
+            fun doNextViaLabel dstLabel =
+               let
+                  val dstChunkLabel = labelChunk dstLabel
+                  val () =
+                     if ChunkLabel.equals (chunkLabel, dstChunkLabel)
+                        then prints ["\tbr label%", Label.toString dstLabel, "\n"]
+                     else let
+                             (* cont.nextChunk = ChunkN *)
+                             val dstChunkName = "@Chunk" ^ chunkLabelToString dstChunkLabel
+                             val () = addCFunction (concat ["%struct.cont ", dstChunkName, "()"])
+                             val dstChunkPtrReg = LLVM.Reg.tmp ()
+                             val () = print (mkconv (dstChunkPtrReg, "bitcast", "%struct.cont ()*", dstChunkName, "i8*"))
+                             val nextChunkPtrReg = LLVM.Reg.tmp ()
+                             val () = print (mkgep (nextChunkPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
+                             val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg))
+                             (* nextFun = l *)
+                             val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, "@nextFun"))
+                             val () = print "\tbr label %exit\n"
+                          in
+                             ()
+                          end
+               in
+                  ()
+               end
+            fun doNextViaStackTop () =
+               let
+                  (* l_nextFun = *(( uintptr_t* )(StackTop - sizeof( void* ))); *)
+                  val stackTop = LLVM.Reg.tmp ()
+                  val () = print (mkload (stackTop, "%Pointer*", "%stackTop"))
+                  val stackTopOffset = LLVM.Reg.tmp ()
+                  val offset = (llbytes o Bits.toBytes o Control.Target.Size.cpointer) ()
+                  val () = print (mkgep (stackTopOffset, "%Pointer", stackTop, [("i32", "-" ^ offset)]))
+                  val stackTopOffsetCast = LLVM.Reg.tmp ()
+                  val () = print (mkconv (stackTopOffsetCast, "bitcast", "%Pointer", stackTopOffset, "%uintptr_t*"))
+                  val nextFun = LLVM.Reg.tmp ()
+                  val () = print (mkload (nextFun, "%uintptr_t*", stackTopOffsetCast))
+                  val () = print (mkstore ("%uintptr_t", nextFun, "%l_nextFun"))
+                  (* goto top; *)
+                  val () = print "\tbr label %top\n"
+               in
+                  ()
+               end
          in
             case transfer of
                Transfer.Arith {args, dst, overflow, prim, success} =>
@@ -1569,22 +1652,73 @@ fun emitChunk {context, chunk, outputLL} =
                      val () = prints ["\t", obitReg, " = extractvalue ", ty, " ", res_obit, ", 1\n"]
                      val (dstTy, dstReg) = operandToAddr dst
                      val () = print (mkstore (dstTy, resReg, dstReg))
-                  in
-                     prints ["\tbr i1 ", obitReg, ", ",
-                             "label %", Label.toString overflow, ", ",
-                             "label %", Label.toString success, "\n"]
-                  end
-             | Transfer.Goto label =>
-                  prints ["\tbr label %", Label.toString label, "\n"]
-(*
-             | Transfer.Switch (Switch.T {cases, default, test, ...}) =>
-                  let
-                     val (testTy, testReg) = operandToValue test
+                     val () = prints ["\tbr i1 ", obitReg, ", ",
+                                      "label %", Label.toString overflow, ", ",
+                                      "label %", Label.toString success, "\n"]
                   in
                      ()
                   end
-*)
-             | _ => print (outputTransfer (context, transfer, chunkLabel))
+             | Transfer.CCall {args, frameInfo, func, return} =>
+                  let
+                     val () = print (outputTransfer (context, transfer, chunkLabel))
+                  in
+                     ()
+                  end
+             | Transfer.Call {label, return, ...} =>
+                  let
+                     val () =
+                        Option.app
+                        (return, fn {return, size, ...} =>
+                         push (return, size))
+                     val () = doNextViaLabel label
+                  in
+                     ()
+                  end
+             | Transfer.Goto label =>
+                  prints ["\tbr label %", Label.toString label, "\n"]
+             | Transfer.Raise =>
+                  let
+                     (* StackTop = StackBottom + ExnStack *)
+                     val (sbpre, stackBottomAddr) = offsetGCState (GCField.StackBottom, "%Pointer*")
+                     val () = print sbpre
+                     val stackBottom = LLVM.Reg.tmp ()
+                     val () = print (mkload (stackBottom, "%Pointer*", stackBottomAddr))
+                     val (espre, exnStackAddr) = offsetGCState (GCField.ExnStack, "i32*")
+                     val () = print espre
+                     val exnStack = LLVM.Reg.tmp ()
+                     val loadExnStack = mkload (exnStack, "i32*", exnStackAddr)
+                     val stackBottomPlusExnStack = LLVM.Reg.tmp ()
+                     val gep = mkgep (stackBottomPlusExnStack, "%Pointer", stackBottom, [("i32", exnStack)])
+                     val store = mkstore ("%Pointer", stackBottomPlusExnStack, "%stackTop")
+
+                     val () = doNextViaStackTop ()
+                  in
+                     ()
+                  end
+             | Transfer.Return =>
+                  let
+                     val () = doNextViaStackTop ()
+                  in
+                     ()
+                  end
+             | Transfer.Switch (Switch.T {cases, default, test, ...}) =>
+                  let
+                     val (testTy, testReg) = operandToValue test
+                     val defaultLabel =
+                        case default of
+                           NONE => unreachableLabel
+                         | SOME l => l
+                     val () = prints ["\tswitch ", testTy, " ", testReg, ", "]
+                     val () = prints ["label %", Label.toString defaultLabel, "\n"]
+                     val () = print "\t\t[\n"
+                     val () =
+                        Vector.foreach
+                        (cases, fn (w, l) =>
+                         prints ["\t\t\t", testTy, " ", llwordx w, ", label %", Label.toString l, "\n"])
+                     val () = print "\t\t]\n"
+                  in
+                     ()
+                  end
          end
 
       fun emitBlock block =
@@ -1794,6 +1928,10 @@ fun emitChunk {context, chunk, outputLL} =
       val cont = LLVM.Reg.tmp ()
       val () = print (mkload (cont, "%struct.cont*", "%cont"))
       val () = prints ["\tret %struct.cont ", cont, "\n"]
+
+      val () = print "\n"
+      val () = prints [Label.toString unreachableLabel, ":\n"]
+      val () = print "\tunreachable\n"
 
       val () = print "\n"
       val () = print "}\n"

@@ -239,6 +239,7 @@ signature PRIM =
       val cpointerAdd: 'a t
       val cpointerDiff: 'a t
       val cpointerEqual: 'a t
+      val cpointerFromWord: 'a t
       val cpointerGet: CType.t -> 'a t 
       val cpointerLt: 'a t
       val cpointerSet: CType.t -> 'a t 

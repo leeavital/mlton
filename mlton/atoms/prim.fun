@@ -672,6 +672,7 @@ val bug = MLton_bug
 val cpointerAdd = CPointer_add
 val cpointerDiff = CPointer_diff
 val cpointerEqual = CPointer_equal
+val cpointerFromWord = CPointer_fromWord
 fun cpointerGet ctype = 
    let datatype z = datatype CType.t
    in
