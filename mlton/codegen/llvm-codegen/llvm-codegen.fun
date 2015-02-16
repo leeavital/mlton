@@ -1812,9 +1812,28 @@ fun emitChunk {context, chunk, outputLL} =
                       in
                          ()
                       end
+
+
+                    fun emitMltonOp (oper, arity) =
+                      let
+                        val fname = "@mlton_" ^ oper ^ rs
+                        val mkArg = fn i => "a" ^ (Int.toString i)
+                        val args = List.tabulate(arity,  mkArg)
+                        val argList = String.concatWith (args, ", ")
+                        val () = prints [";", "define ", ty, " ", fname, "(", argList, ")", "\n"]
+                        (* val args = String.concatWith ((List.tabulate(arity ,
+                            fn i => (" a" ^ Int.toString i), ",")
+                        val () = prints ["declare ", ty, "@mlton_", oper, "( ",
+                        args, " )",  " { ", "\n" ] *)
+                      in
+                        ()
+                      end
+
                    fun emitUnop oper = emitOp (oper, 1)
                    fun emitBinop oper = emitOp (oper, 2)
                    fun emitTernop oper = emitOp (oper, 3)
+                   fun emitUnMOp oper = emitMltonOp (oper, 1)
+                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnMOp)
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnop)
                    val () = List.foreach (["fma"], emitTernop)
                 in
