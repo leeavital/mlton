@@ -193,16 +193,23 @@ structure LLMath =
   struct
     local
       fun mkFName (oper: string) (rs: RealSize.t) =
-        "@mlton_" ^ oper ^ ".f" ^ (llrs rs)
-
+        concat [ "@mlton_", oper, ".f", (RealSize.toString rs)]
+            
       fun mkArgList (argc: int) (rs: RealSize.t) =
         let val args = List.tabulate(argc, fn i =>
           (llrs rs) ^ " %a" ^ (Int.toString i))
         in String.concatWith (args, ", ") end
           
-          
-
-      fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) = ""
+      
+      fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) =
+        let val fname = mkFName oper rs  
+            val args = mkArgList argc rs
+            val rty = llrs rs
+            in concat ["define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+              "\t%1 = call ", rty, " @llvm.", oper, ".f", RealSize.toString rs, " (", args, ")\n",
+              "\tret ", rty, " %1\n",
+              "}\n"]
+        end
     in
       val mkPrimUnOp = mkPrimWrapper 1
       val mkPrimTernOp = mkPrimWrapper 3
@@ -1861,9 +1868,12 @@ fun emitChunk {context, chunk, outputLL} =
                    fun emitBinop oper = emitOp (oper, 2)
                    fun emitTernop oper = emitOp (oper, 3)
                    fun emitUnMOp oper = emitMltonOp (oper, 1)
-                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnMOp)
+                   fun emitPrimUnop oper = 
+                      print ( LLMath.mkPrimUnOp rs oper )
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnop)
                    val () = List.foreach (["fma"], emitTernop)
+                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log",
+                   "log10", "fabs", "rint"], emitPrimUnop)
                 in
                    ()
                 end)
