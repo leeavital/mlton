@@ -53,6 +53,8 @@ structure C =
           ; print ";\n")
    end
 
+
+
 fun implementsPrim (p: 'a Prim.t): bool =
    let
       datatype z = datatype Prim.Name.t
@@ -185,6 +187,27 @@ fun llrs (rs: RealSize.t): string =
 
 (* Reuse CType for LLVM type *)
 fun llty (ty: Type.t): string = "%" ^ CType.toString (Type.toCType ty)
+
+
+structure LLMath =
+  struct
+    local
+      fun mkFName (oper: string) (rs: RealSize.t) =
+        "@mlton_" ^ oper ^ ".f" ^ (llrs rs)
+
+      fun mkArgList (argc: int) (rs: RealSize.t) =
+        let val args = List.tabulate(argc, fn i =>
+          (llrs rs) ^ " %a" ^ (Int.toString i))
+        in String.concatWith (args, ", ") end
+          
+          
+
+      fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) = ""
+    in
+      val mkPrimUnOp = mkPrimWrapper 1
+      val mkPrimTernOp = mkPrimWrapper 3
+    end
+  end
 
 fun typeOfGlobal global =
     let
@@ -1801,9 +1824,9 @@ fun emitChunk {context, chunk, outputLL} =
       val () = List.foreach
                (RealSize.all, fn rs =>
                 let
-                   val rs = RealSize.toString rs
-                   val ty = "%Real" ^ rs
-                   val operTy = "f" ^ rs
+                   val rs' = RealSize.toString rs
+                   val ty = "%Real" ^ rs'
+                   val operTy = "f" ^ rs'
                    fun emitOp (oper, arity) =
                       let
                          val () = prints ["declare ", ty, " @llvm.", oper, ".", operTy, "("]
@@ -1816,11 +1839,16 @@ fun emitChunk {context, chunk, outputLL} =
 
                     fun emitMltonOp (oper, arity) =
                       let
-                        val fname = "@mlton_" ^ oper ^ rs
-                        val mkArg = fn i => "a" ^ (Int.toString i)
+                        val fname = "@mlton_" ^ oper ^ ".f" ^ rs'
+                        val mkArg = fn i => ty ^ " %a" ^ (Int.toString i)
                         val args = List.tabulate(arity,  mkArg)
                         val argList = String.concatWith (args, ", ")
-                        val () = prints [";", "define ", ty, " ", fname, "(", argList, ")", "\n"]
+                        val () = prints ["; define ", ty, " ", fname, "(",
+                          argList, ")", "{ ", " alwaysinline\n"]
+                        val () = prints ["; \t%1 = call ", ty , " ",  fname, "(",
+                            argList, ")\n"]
+                        val () = prints ["; \tret ", ty, " %1\n"]
+                        val () = prints [";", "}\n"]
                         (* val args = String.concatWith ((List.tabulate(arity ,
                             fn i => (" a" ^ Int.toString i), ",")
                         val () = prints ["declare ", ty, "@mlton_", oper, "( ",
