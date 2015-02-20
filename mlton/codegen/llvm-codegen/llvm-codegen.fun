@@ -210,9 +210,20 @@ structure LLMath =
               "\tret ", rty, " %1\n",
               "}\n"]
         end
+
+      fun mkComplexWrapper (argc: int) (rs: RealSize.t) (oper: string) =
+        let val fname = mkFName oper rs
+            val args = mkArgList argc rs
+            val rty = llrs rs
+          in concat ["define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+              "\t%1 = call ", rty, " ", rty, "_Math_", oper, "(", args, ")\n",
+              "\tret ", rty, " %1\n",
+              "}\n"]
+          end
     in
       val mkPrimUnOp = mkPrimWrapper 1
       val mkPrimTernOp = mkPrimWrapper 3
+      val mkComplexUnOp = mkComplexWrapper 1
     end
   end
 
@@ -1843,37 +1854,16 @@ fun emitChunk {context, chunk, outputLL} =
                          ()
                       end
 
-
-                    fun emitMltonOp (oper, arity) =
-                      let
-                        val fname = "@mlton_" ^ oper ^ ".f" ^ rs'
-                        val mkArg = fn i => ty ^ " %a" ^ (Int.toString i)
-                        val args = List.tabulate(arity,  mkArg)
-                        val argList = String.concatWith (args, ", ")
-                        val () = prints ["; define ", ty, " ", fname, "(",
-                          argList, ")", "{ ", " alwaysinline\n"]
-                        val () = prints ["; \t%1 = call ", ty , " ",  fname, "(",
-                            argList, ")\n"]
-                        val () = prints ["; \tret ", ty, " %1\n"]
-                        val () = prints [";", "}\n"]
-                        (* val args = String.concatWith ((List.tabulate(arity ,
-                            fn i => (" a" ^ Int.toString i), ",")
-                        val () = prints ["declare ", ty, "@mlton_", oper, "( ",
-                        args, " )",  " { ", "\n" ] *)
-                      in
-                        ()
-                      end
-
                    fun emitUnop oper = emitOp (oper, 1)
                    fun emitBinop oper = emitOp (oper, 2)
                    fun emitTernop oper = emitOp (oper, 3)
-                   fun emitUnMOp oper = emitMltonOp (oper, 1)
-                   fun emitPrimUnop oper = 
+                   val emitUnaryPrim  = LLMath.mkPrimUnOp rs
+                   val emitUnaryComplex = LLMath.mkComplexUnOp rs
+                   fun emitPrimUnop oper =
                       print ( LLMath.mkPrimUnOp rs oper )
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnop)
                    val () = List.foreach (["fma"], emitTernop)
-                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log",
-                   "log10", "fabs", "rint"], emitPrimUnop)
+                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitPrimUnop)
                 in
                    ()
                 end)
