@@ -78,7 +78,7 @@ fun implementsPrim (p: 'a Prim.t): bool =
        | Real_Math_log10 _ => true
        | Real_Math_sin _ => true
        | Real_Math_sqrt _ => true
-       | Real_Math_tan _ => false
+       | Real_Math_tan _ => true (* not really *)
        | Real_abs _ => true (* Requires LLVM 3.2 to use "llvm.fabs" intrinsic *)
        | Real_add _ => true
        | Real_castToWord _ => true
@@ -194,18 +194,20 @@ structure LLMath =
     local
       fun mkFName (oper: string) (rs: RealSize.t) =
         concat [ "@mlton_", oper, ".f", (RealSize.toString rs)]
-            
+
       fun mkArgList (argc: int) (rs: RealSize.t) =
         let val args = List.tabulate(argc, fn i =>
           (llrs rs) ^ " %a" ^ (Int.toString i))
         in String.concatWith (args, ", ") end
-          
-      
+
+
       fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) =
         let val fname = mkFName oper rs  
             val args = mkArgList argc rs
             val rty = llrs rs
-            in concat ["define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+            in concat [
+              "declare ", rty, " @llvm.", oper, ".f", RealSize.toString rs, "(", args, ")\n",
+              "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
               "\t%1 = call ", rty, " @llvm.", oper, ".f", RealSize.toString rs, " (", args, ")\n",
               "\tret ", rty, " %1\n",
               "}\n"]
@@ -215,8 +217,10 @@ structure LLMath =
         let val fname = mkFName oper rs
             val args = mkArgList argc rs
             val rty = llrs rs
-          in concat ["define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
-              "\t%1 = call ", rty, " ", rty, "_Math_", oper, "(", args, ")\n",
+          in concat [
+              "declare ", rty, " ", "@Real", RealSize.toString rs, "_Math_" , oper, "(", args, ")\n",
+              "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+              "\t%1 = call ", rty, " @Real", RealSize.toString rs, "_Math_", oper, "(", args, ")\n",
               "\tret ", rty, " %1\n",
               "}\n"]
           end
@@ -1466,9 +1470,7 @@ fun emitChunk {context, chunk, outputLL} =
              | Real_Math_log10 rs => doMathCall ("log10", rs)
              | Real_Math_sin rs => doMathCall ("sin", rs)
              | Real_Math_sqrt rs => doMathCall ("sqrt", rs)
-             (*
-             | Real_Math_tan _ => false
-             *)
+             | Real_Math_tan rs => doMathCall("tan", rs)
              | Real_abs rs => doMathCall ("fabs", rs)
              | Real_add _ => doBinAL "fadd"
              | Real_castToWord (_, ws) => doConv ("bitcast", "%Word" ^ (WordSize.toString ws))
@@ -1857,13 +1859,11 @@ fun emitChunk {context, chunk, outputLL} =
                    fun emitUnop oper = emitOp (oper, 1)
                    fun emitBinop oper = emitOp (oper, 2)
                    fun emitTernop oper = emitOp (oper, 3)
-                   val emitUnaryPrim  = LLMath.mkPrimUnOp rs
-                   val emitUnaryComplex = LLMath.mkComplexUnOp rs
-                   fun emitPrimUnop oper =
-                      print ( LLMath.mkPrimUnOp rs oper )
-                   val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitUnop)
+                   val emitPrimUnop = print o (LLMath.mkPrimUnOp rs)
+                   val emitComplexUnop = print o (LLMath.mkComplexUnOp rs)
                    val () = List.foreach (["fma"], emitTernop)
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitPrimUnop)
+                   val () = List.foreach (["tan"], emitComplexUnop)
                 in
                    ()
                 end)
