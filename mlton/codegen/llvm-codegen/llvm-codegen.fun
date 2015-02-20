@@ -1378,7 +1378,7 @@ fun emitChunk {context, chunk, outputLL} =
                end
             fun doMathCall (call, rs) =
                let val rs = RealSize.toString rs
-               in doCall ("@llvm." ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
+               in doCall ("@mlton_" ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
                end
             datatype z = datatype Prim.Name.t
          in
