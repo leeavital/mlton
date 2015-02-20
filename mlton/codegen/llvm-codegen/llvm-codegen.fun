@@ -1844,24 +1844,10 @@ fun emitChunk {context, chunk, outputLL} =
       val () = List.foreach
                (RealSize.all, fn rs =>
                 let
-                   val rs' = RealSize.toString rs
-                   val ty = "%Real" ^ rs'
-                   val operTy = "f" ^ rs'
-                   fun emitOp (oper, arity) =
-                      let
-                         val () = prints ["declare ", ty, " @llvm.", oper, ".", operTy, "("]
-                         val () = Int.for (0, arity - 1, fn _ => prints [ty, ","])
-                         val () = prints [ty, ")\n"]
-                      in
-                         ()
-                      end
-
-                   fun emitUnop oper = emitOp (oper, 1)
-                   fun emitBinop oper = emitOp (oper, 2)
-                   fun emitTernop oper = emitOp (oper, 3)
                    val emitPrimUnop = print o (LLMath.mkPrimUnOp rs)
+                   val emitPrimTernOp = print o (LLMath.mkPrimTernOp rs)
                    val emitComplexUnop = print o (LLMath.mkComplexUnOp rs)
-                   val () = List.foreach (["fma"], emitTernop)
+                   val () = List.foreach (["fma"], emitPrimTernOp)
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitPrimUnop)
                    val () = List.foreach (["tan"], emitComplexUnop)
                 in
