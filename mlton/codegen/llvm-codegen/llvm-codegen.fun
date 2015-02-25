@@ -188,12 +188,6 @@ fun llrs (rs: RealSize.t): string =
 (* Reuse CType for LLVM type *)
 fun llty (ty: Type.t): string = "%" ^ CType.toString (Type.toCType ty)
 
-fun llFunDecl (label: string) (rty: Type.t) (args: Type.t list) =
-  let val argList = String.concatWith (map llty  args, ", ")
-  in concat ["declare ", (llty rty), " @", label, "(", argList, ")" ]
-  end
-
-
 structure LLMath =
   struct
       local
