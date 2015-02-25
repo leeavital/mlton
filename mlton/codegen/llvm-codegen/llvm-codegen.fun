@@ -196,35 +196,34 @@ fun llFunDecl (label: string) (rty: Type.t) (args: Type.t list) =
 
 structure LLMath =
   struct
-      fun mkFName oper rs =
-        concat [ "mlton_", oper, ".f", (RealSize.toString rs)]
+      local
+        fun mkFName oper rs =
+          concat [ "mlton_", oper, ".f", (RealSize.toString rs)]
 
-      fun mkArgList argc rs =
-        let val args = List.tabulate(argc, fn i =>
-          (llrs rs) ^ " %a" ^ (Int.toString i))
-        in String.concatWith (args, ", ") end
+        fun mkArgList argc rs =
+          let val args = List.tabulate(argc, fn i =>
+            (llrs rs) ^ " %a" ^ (Int.toString i))
+          in String.concatWith (args, ", ") end
 
-      fun mkWrapper (mkWrapped: RealSize.t -> string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
-        let val fname = concat ["@", mkFName oper rs]
-            val args = mkArgList argc rs
-            val rty = llrs rs
-         in concat [
-            "declare ", rty, " @", mkWrapped rs oper, "(", args, ")\n",
-            "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
-            "\t%1 = call ", rty, " @", mkWrapped rs oper, " (", args, ")\n",
-            "\tret ", rty, " %1\n",
-            "}\n"]
-          end
+        fun mkWrapper (mkWrapped: RealSize.t -> string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
+          let val fname = concat ["@", mkFName oper rs]
+              val args = mkArgList argc rs
+              val rty = llrs rs
+           in concat [
+              "declare ", rty, " @", mkWrapped rs oper, "(", args, ")\n",
+              "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+              "\t%1 = call ", rty, " @", mkWrapped rs oper, " (", args, ")\n",
+              "\tret ", rty, " %1\n",
+              "}\n"]
+            end
 
-      fun intrinsicName rs oper = concat ["llvm.", oper, ".f", RealSize.toString rs]
-      fun externalName rs oper = concat ["Real", RealSize.toString rs, "_Math_", oper]
-      val mkPrimWrapper = mkWrapper intrinsicName
-      val mkComplexWrapper = mkWrapper externalName
-
-
-      val mkPrimUnOp = mkPrimWrapper 1
-      val mkPrimTernOp = mkPrimWrapper 3
-      val mkComplexUnOp = mkComplexWrapper 1
+        fun intrinsicName rs oper = concat ["llvm.", oper, ".f", RealSize.toString rs]
+        fun externalName rs oper = concat ["Real", RealSize.toString rs, "_Math_", oper]
+      in
+        val mkIntrinsicUnOp = mkWrapper intrinsicName 1
+        val mkIntrinsicTernOp = mkWrapper intrinsicName 3
+        val mkExternalUnOp = mkWrapper externalName 1
+      end
   end
 
 fun typeOfGlobal global =
@@ -1840,9 +1839,9 @@ fun emitChunk {context, chunk, outputLL} =
       val () = List.foreach
                (RealSize.all, fn rs =>
                 let
-                   val emitPrimUnop = print o (LLMath.mkPrimUnOp rs)
-                   val emitPrimTernOp = print o (LLMath.mkPrimTernOp rs)
-                   val emitComplexUnop = print o (LLMath.mkComplexUnOp rs)
+                   val emitPrimUnop = print o (LLMath.mkIntrinsicUnOp rs)
+                   val emitPrimTernOp = print o (LLMath.mkIntrinsicTernOp rs)
+                   val emitComplexUnop = print o (LLMath.mkExternalUnOp rs)
                    val () = List.foreach (["fma"], emitPrimTernOp)
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitPrimUnop)
                    val () = List.foreach (["tan"], emitComplexUnop)
