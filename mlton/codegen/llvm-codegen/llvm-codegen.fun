@@ -188,10 +188,14 @@ fun llrs (rs: RealSize.t): string =
 (* Reuse CType for LLVM type *)
 fun llty (ty: Type.t): string = "%" ^ CType.toString (Type.toCType ty)
 
+fun llFunDecl (label: string) (rty: Type.t) (args: Type.t list) =
+  let val argList = String.concatWith (map llty  args, ", ")
+  in concat ["declare ", (llty rty), " @", label, "(", argList, ")" ]
+  end
+
 
 structure LLMath =
   struct
-    local
       fun mkFName (oper: string) (rs: RealSize.t) =
         concat [ "@mlton_", oper, ".f", (RealSize.toString rs)]
 
@@ -200,9 +204,21 @@ structure LLMath =
           (llrs rs) ^ " %a" ^ (Int.toString i))
         in String.concatWith (args, ", ") end
 
+      fun mkWrapper (mkWrapped: string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
+        let val fname = mkFName oper rs
+            val args = mkArgList argc rs
+            val rty = llrs rs
+         in concat [
+            "declare ", rty, " @", mkWrapped oper, "(", args, ")\n",
+            "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
+            "\t%1 = call ", rty, mkWrapped oper, " (", args, ")\n",
+            "\tret ", rty, " %1\n",
+            "}\n"]
+          end
+      fun instrinsicName rs x = concat ["llvm.", x, ".f", RealSize.toString rs]
 
       fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) =
-        let val fname = mkFName oper rs  
+        let val fname = mkFName oper rs
             val args = mkArgList argc rs
             val rty = llrs rs
             in concat [
@@ -224,11 +240,9 @@ structure LLMath =
               "\tret ", rty, " %1\n",
               "}\n"]
           end
-    in
       val mkPrimUnOp = mkPrimWrapper 1
       val mkPrimTernOp = mkPrimWrapper 3
       val mkComplexUnOp = mkComplexWrapper 1
-    end
   end
 
 fun typeOfGlobal global =
