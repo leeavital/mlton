@@ -204,42 +204,23 @@ structure LLMath =
           (llrs rs) ^ " %a" ^ (Int.toString i))
         in String.concatWith (args, ", ") end
 
-      fun mkWrapper (mkWrapped: string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
+      fun mkWrapper (mkWrapped: RealSize.t -> string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
         let val fname = mkFName oper rs
             val args = mkArgList argc rs
             val rty = llrs rs
          in concat [
-            "declare ", rty, " @", mkWrapped oper, "(", args, ")\n",
+            "declare ", rty, " @", mkWrapped rs oper, "(", args, ")\n",
             "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
-            "\t%1 = call ", rty, mkWrapped oper, " (", args, ")\n",
+            "\t%1 = call ", rty, " @", mkWrapped rs oper, " (", args, ")\n",
             "\tret ", rty, " %1\n",
             "}\n"]
           end
-      fun instrinsicName rs x = concat ["llvm.", x, ".f", RealSize.toString rs]
+      fun intrinsicName rs oper = concat ["llvm.", oper, ".f", RealSize.toString rs]
+      fun externalName rs oper = concat ["Real", RealSize.toString rs, "_Math_", oper]
+      val mkPrimWrapper = mkWrapper intrinsicName
+      val mkComplexWrapper = mkWrapper externalName
 
-      fun mkPrimWrapper (argc: int) (rs: RealSize.t) (oper: string) =
-        let val fname = mkFName oper rs
-            val args = mkArgList argc rs
-            val rty = llrs rs
-            in concat [
-              "declare ", rty, " @llvm.", oper, ".f", RealSize.toString rs, "(", args, ")\n",
-              "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
-              "\t%1 = call ", rty, " @llvm.", oper, ".f", RealSize.toString rs, " (", args, ")\n",
-              "\tret ", rty, " %1\n",
-              "}\n"]
-        end
 
-      fun mkComplexWrapper (argc: int) (rs: RealSize.t) (oper: string) =
-        let val fname = mkFName oper rs
-            val args = mkArgList argc rs
-            val rty = llrs rs
-          in concat [
-              "declare ", rty, " ", "@Real", RealSize.toString rs, "_Math_" , oper, "(", args, ")\n",
-              "define private ", rty, " ", fname, "(", args, ") alwaysinline {\n",
-              "\t%1 = call ", rty, " @Real", RealSize.toString rs, "_Math_", oper, "(", args, ")\n",
-              "\tret ", rty, " %1\n",
-              "}\n"]
-          end
       val mkPrimUnOp = mkPrimWrapper 1
       val mkPrimTernOp = mkPrimWrapper 3
       val mkComplexUnOp = mkComplexWrapper 1
