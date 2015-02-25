@@ -196,16 +196,16 @@ fun llFunDecl (label: string) (rty: Type.t) (args: Type.t list) =
 
 structure LLMath =
   struct
-      fun mkFName (oper: string) (rs: RealSize.t) =
-        concat [ "@mlton_", oper, ".f", (RealSize.toString rs)]
+      fun mkFName oper rs =
+        concat [ "mlton_", oper, ".f", (RealSize.toString rs)]
 
-      fun mkArgList (argc: int) (rs: RealSize.t) =
+      fun mkArgList argc rs =
         let val args = List.tabulate(argc, fn i =>
           (llrs rs) ^ " %a" ^ (Int.toString i))
         in String.concatWith (args, ", ") end
 
       fun mkWrapper (mkWrapped: RealSize.t -> string -> string) (argc: int) (rs: RealSize.t) (oper: string) =
-        let val fname = mkFName oper rs
+        let val fname = concat ["@", mkFName oper rs]
             val args = mkArgList argc rs
             val rty = llrs rs
          in concat [
@@ -215,6 +215,7 @@ structure LLMath =
             "\tret ", rty, " %1\n",
             "}\n"]
           end
+
       fun intrinsicName rs oper = concat ["llvm.", oper, ".f", RealSize.toString rs]
       fun externalName rs oper = concat ["Real", RealSize.toString rs, "_Math_", oper]
       val mkPrimWrapper = mkWrapper intrinsicName
