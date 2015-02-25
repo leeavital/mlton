@@ -214,6 +214,7 @@ structure LLMath =
         fun intrinsicName rs oper = concat ["llvm.", oper, ".f", RealSize.toString rs]
         fun externalName rs oper = concat ["Real", RealSize.toString rs, "_Math_", oper]
       in
+        val mkFName = mkFName
         val mkIntrinsicUnOp = mkWrapper intrinsicName 1
         val mkIntrinsicTernOp = mkWrapper intrinsicName 3
         val mkExternalUnOp = mkWrapper externalName 1
@@ -1381,8 +1382,8 @@ fun emitChunk {context, chunk, outputLL} =
                in doCall ("@llvm." ^ call ^ ".with.overflow.i" ^ ws, "{%Word" ^ ws ^ ",i1}", args)
                end
             fun doMathCall (call, rs) =
-               let val rs = RealSize.toString rs
-               in doCall ("@mlton_" ^ call ^ ".f" ^ rs, "%Real" ^ rs, args)
+               let val fname = LLMath.mkFName call rs
+               in doCall ("@" ^ fname, llrs rs, args)
                end
             datatype z = datatype Prim.Name.t
          in
