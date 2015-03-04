@@ -53,8 +53,6 @@ structure C =
           ; print ";\n")
    end
 
-
-
 fun implementsPrim (p: 'a Prim.t): bool =
    let
       datatype z = datatype Prim.Name.t
@@ -68,9 +66,9 @@ fun implementsPrim (p: 'a Prim.t): bool =
        | CPointer_sub => true
        | CPointer_toWord => true
        | FFI_Symbol _ => true
-       | Real_Math_acos _ => false
-       | Real_Math_asin _ => false
-       | Real_Math_atan _ => false
+       | Real_Math_acos _ => true (* ...*)
+       | Real_Math_asin _ => true (* .. *)
+       | Real_Math_atan _ => true (* ... *)
        | Real_Math_atan2 _ => false
        | Real_Math_cos _ => true
        | Real_Math_exp _ => true
@@ -192,7 +190,7 @@ structure LLMath =
   struct
       local
         fun mkFName oper rs =
-          concat [ "mlton_", oper, ".f", (RealSize.toString rs)]
+          concat [ "mlton.", oper, ".f", (RealSize.toString rs)]
 
         fun mkArgList argc rs =
           let val args = List.tabulate(argc, fn i =>
@@ -1454,6 +1452,9 @@ fun emitChunk {context, chunk, outputLL} =
              | Real_Math_atan _ => false
              | Real_Math_atan2 _ => false
              *)
+             | Real_Math_acos rs => doMathCall ("acos", rs)
+             | Real_Math_atan rs => doMathCall ("atan", rs)
+             | Real_Math_asin rs => doMathCall ("asin", rs)
              | Real_Math_cos rs => doMathCall ("cos", rs)
              | Real_Math_exp rs => doMathCall ("exp", rs)
              | Real_Math_ln rs => doMathCall ("log", rs)
@@ -1839,7 +1840,7 @@ fun emitChunk {context, chunk, outputLL} =
                    val emitComplexUnop = print o (LLMath.mkExternalUnOp rs)
                    val () = List.foreach (["fma"], emitPrimTernOp)
                    val () = List.foreach (["sqrt", "sin", "cos", "exp", "log", "log10", "fabs", "rint"], emitPrimUnop)
-                   val () = List.foreach (["tan"], emitComplexUnop)
+                   val () = List.foreach (["tan", "acos", "asin", "atan"], emitComplexUnop)
                 in
                    ()
                 end)
