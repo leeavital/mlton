@@ -1640,6 +1640,7 @@ fun emitChunk {context, chunk, outputLL} =
                         then prints ["\tbr label%", Label.toString dstLabel, "\n"]
                      else let
                              (* cont.nextChunk = ChunkN *)
+                            val () = print (concat ["; transferring to ", Label.toString dstLabel])
                              val dstChunkName = "@Chunk" ^ chunkLabelToString dstChunkLabel
                              val () = addCFunction (concat ["%struct.cont ", dstChunkName, "()"])
                              val dstChunkPtrReg = LLVM.Reg.tmp ()
@@ -2086,7 +2087,7 @@ fun emitC {context, outputC} =
     in
         CCodegen.outputDeclarations
             {additionalMainArgs = additionalMainArgs,
-             includes = ["c-main.h"],
+             includes = ["llvm-main.h"],
              print = print,
              program = program,
              rest = rest}
