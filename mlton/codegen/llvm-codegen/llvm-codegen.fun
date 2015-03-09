@@ -1650,7 +1650,7 @@ fun emitChunk {context, chunk, outputLL} =
                              val () = print (mkgep (nextChunkPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
                              val () = print (mkgep (nextFunPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "1")]))
                              val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg))
-                             (* val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg)) *)
+                             val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, nextFunPtrReg))
                              (* nextFun = l *)
                              val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, "@nextFun"))
                              val () = print "\tbr label %exit\n"
@@ -1881,7 +1881,7 @@ fun emitChunk {context, chunk, outputLL} =
           end)
       val () = print "\n"
       (* ??? *)
-      val () = print "%struct.cont = type { i8*, i8* }  ; nextChunk, nextFun\n"
+      val () = print "%struct.cont = type { i8*, %uintptr_t }  ; nextChunk, nextFun\n"
       val () = print "%struct.GC_state = type opaque\n"
       val () = print "@nextFun = external hidden global %uintptr_t\n"
       val () = print "@returnToC = external hidden global i32\n"

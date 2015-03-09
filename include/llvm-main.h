@@ -59,7 +59,7 @@ static void MLton_callFromC () {                                        \
 #define MLtonMain(al, mg, mfs, mmc, pk, ps, mc, ml)                     \
 MLtonCallFromC                                                          \
 PUBLIC int MLton_main (int argc, char* argv[]) {                        \
-        struct cont cont;                                               \
+        struct llvm_cont cont;                                               \
         Initialize (al, mg, mfs, mmc, pk, ps);                          \
         if (gcState.amOriginal) {                                       \
                 real_Init();                                            \
@@ -67,18 +67,12 @@ PUBLIC int MLton_main (int argc, char* argv[]) {                        \
         } else {                                                        \
                 /* Return to the saved world */                         \
                 nextFun = *(uintptr_t*)(gcState.stackTop - GC_RETURNADDRESS_SIZE); \
+                cont.nextFun = *(uintptr_t*)(gcState.stackTop - GC_RETURNADDRESS_SIZE); \
                 cont.nextChunk = nextChunks[nextFun];                   \
         }                                                               \
         /* Trampoline */                                                \
         while (1) {                                                     \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
+                cont=(*(struct llvm_cont(*)(uintptr_t))cont.nextChunk)(cont.nextFun);\
         }                                                               \
         return 1;                                                       \
 }
