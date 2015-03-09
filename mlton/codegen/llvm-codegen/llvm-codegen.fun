@@ -1640,14 +1640,17 @@ fun emitChunk {context, chunk, outputLL} =
                         then prints ["\tbr label%", Label.toString dstLabel, "\n"]
                      else let
                              (* cont.nextChunk = ChunkN *)
-                            val () = print (concat ["; transferring to ", Label.toString dstLabel])
+                             val () = print (concat ["; transferring to ", Label.toString dstLabel, "\n"])
                              val dstChunkName = "@Chunk" ^ chunkLabelToString dstChunkLabel
                              val () = addCFunction (concat ["%struct.cont ", dstChunkName, "()"])
-                             val dstChunkPtrReg = LLVM.Reg.tmp ()
+                             val dstChunkPtrReg = LLVM.Reg.tmp () (* cast nextChunk function ptr to i8* *)
                              val () = print (mkconv (dstChunkPtrReg, "bitcast", "%struct.cont ()*", dstChunkName, "i8*"))
-                             val nextChunkPtrReg = LLVM.Reg.tmp ()
+                             val nextChunkPtrReg = LLVM.Reg.tmp () (* get ptr to %cont.nextChunk *)
+                             val nextFunPtrReg = LLVM.Reg.tmp ()  (* ptr to %cont.nextFun *)
                              val () = print (mkgep (nextChunkPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
+                             val () = print (mkgep (nextFunPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "1")]))
                              val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg))
+                             (* val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg)) *)
                              (* nextFun = l *)
                              val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, "@nextFun"))
                              val () = print "\tbr label %exit\n"
@@ -1878,7 +1881,7 @@ fun emitChunk {context, chunk, outputLL} =
           end)
       val () = print "\n"
       (* ??? *)
-      val () = print "%struct.cont = type { i8* }\n"
+      val () = print "%struct.cont = type { i8*, i8* }  ; nextChunk, nextFun\n"
       val () = print "%struct.GC_state = type opaque\n"
       val () = print "@nextFun = external hidden global %uintptr_t\n"
       val () = print "@returnToC = external hidden global i32\n"
@@ -1950,6 +1953,7 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "exit:\n"
       val () = print (flushFrontier ())
       val () = print (flushStackTop ())
+      val () = print ("; load and return next cont\n")
       val cont = LLVM.Reg.tmp ()
       val () = print (mkload (cont, "%struct.cont*", "%cont"))
       val () = prints ["\tret %struct.cont ", cont, "\n"]
