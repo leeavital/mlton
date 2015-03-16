@@ -70,8 +70,10 @@ PUBLIC int MLton_main (int argc, char* argv[]) {                        \
                 cont.nextFun = *(uintptr_t*)(gcState.stackTop - GC_RETURNADDRESS_SIZE); \
                 cont.nextChunk = nextChunks[nextFun];                   \
         }                                                               \
+        cont.nextFun = nextFun;                                         \
         /* Trampoline */                                                \
         while (1) {                                                     \
+                printf("global: %d local: %d\n", nextFun, cont.nextFun);\
                 cont=(*(struct llvm_cont(*)(uintptr_t))cont.nextChunk)(cont.nextFun);\
         }                                                               \
         return 1;                                                       \

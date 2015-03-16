@@ -1640,7 +1640,7 @@ fun emitChunk {context, chunk, outputLL} =
                         then prints ["\tbr label%", Label.toString dstLabel, "\n"]
                      else let
                              (* cont.nextChunk = ChunkN *)
-                             val () = print (concat ["; transferring to ", Label.toString dstLabel, "\n"])
+                             val () = print "\t; transfer via label\n"
                              val dstChunkName = "@Chunk" ^ chunkLabelToString dstChunkLabel
                              val () = addCFunction (concat ["%struct.cont ", dstChunkName, "()"])
                              val dstChunkPtrReg = LLVM.Reg.tmp () (* cast nextChunk function ptr to i8* *)
@@ -1663,6 +1663,7 @@ fun emitChunk {context, chunk, outputLL} =
             fun doNextViaStackTop () =
                let
                   (* l_nextFun = *(( uintptr_t* )(StackTop - sizeof( void* ))); *)
+                  val () = print "\t; next via stack top\n"
                   val stackTop = LLVM.Reg.tmp ()
                   val () = print (mkload (stackTop, "%Pointer*", "%stackTop"))
                   val stackTopOffset = LLVM.Reg.tmp ()
@@ -1682,6 +1683,7 @@ fun emitChunk {context, chunk, outputLL} =
             case transfer of
                Transfer.Arith {args, dst, overflow, prim, success} =>
                   let
+                     val () = print "\t;branch transferring\n"
                      val args = Vector.map (args, operandToValue)
                      val (ty, res_obit) = emitPrimApp {args = args, prim = prim}
                      val resReg = LLVM.Reg.tmp ()
@@ -1735,6 +1737,7 @@ fun emitChunk {context, chunk, outputLL} =
                   end
              | Transfer.Return =>
                   let
+                     val () = print "\t;return transferring\n"
                      val () = doNextViaStackTop ()
                   in
                      ()
@@ -1890,7 +1893,7 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "\n"
 
       val () = print "\n\n"
-      val () = prints ["define hidden %struct.cont @Chunk", chunkLabelToString chunkLabel, " () {\n"]
+      val () = prints ["define hidden %struct.cont @Chunk", chunkLabelToString chunkLabel, " (%uintptr_t %block) {\n"]
 
       val () = print "\n"
       val () = print "entry:\n"
@@ -1898,7 +1901,7 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "\t%l_nextFun = alloca %uintptr_t\n"
       val nextFun = LLVM.Reg.tmp ()
       val () = print (mkload (nextFun, "%uintptr_t*", "@nextFun"))
-      val () = print (mkstore ("%uintptr_t", nextFun, "%l_nextFun"))
+      val () = print (mkstore ("%uintptr_t", "%block", "%l_nextFun"))
       val () = print "\t%frontier = alloca %Pointer\n"
       val () = print (cacheFrontier ())
       val () = print "\t%stackTop = alloca %Pointer\n"
@@ -1945,8 +1948,11 @@ fun emitChunk {context, chunk, outputLL} =
       val nextChunks_nextFun_bc = LLVM.Reg.tmp ()
       val () = print (mkconv (nextChunks_nextFun_bc, "bitcast", "%struct.cont () *", nextChunks_nextFun, "i8*"))
       val cont_nextChunk_ptr = LLVM.Reg.tmp ()
+      val cont_nextFun_ptr = LLVM.Reg.tmp ()
       val () = print (mkgep (cont_nextChunk_ptr, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
+      val () = print (mkgep (cont_nextFun_ptr, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "1")]))
       val () = print (mkstore ("i8*", nextChunks_nextFun_bc, cont_nextChunk_ptr))
+      val () = print (mkstore ("%uintptr_t", nextFun, cont_nextFun_ptr))
       val () = print "\tbr label %exit\n"
 
       val () = print "\n"
