@@ -1605,6 +1605,7 @@ fun emitChunk {context, chunk, outputLL} =
                      if ChunkLabel.equals (chunkLabel, dstChunkLabel)
                         then prints ["\tbr label%", Label.toString dstLabel, "\n"]
                      else let
+                             val () = print "\t;doNextViaLabel\n"
                              (* cont.nextChunk = ChunkN *)
                              val dstChunkName = "@Chunk" ^ chunkLabelToString dstChunkLabel
                              val () = addCFunction (concat ["%struct.cont ", dstChunkName, "()"])
@@ -1614,7 +1615,7 @@ fun emitChunk {context, chunk, outputLL} =
                              val () = print (mkgep (nextChunkPtrReg, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
                              val () = print (mkstore ("i8*", dstChunkPtrReg, nextChunkPtrReg))
                              (* nextFun = l *)
-                             val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, "@nextFun"))
+                             val () = print (mkstore ("%uintptr_t", labelToStringIndex dstLabel, "%l_nextFun"))
                              val () = print "\tbr label %exit\n"
                           in
                              ()
@@ -1624,6 +1625,8 @@ fun emitChunk {context, chunk, outputLL} =
                end
             fun doNextViaStackTop () =
                let
+
+                  val () = print "\t;doNextViaStackTop\n"
                   (* l_nextFun = *(( uintptr_t* )(StackTop - sizeof( void* ))); *)
                   val stackTop = LLVM.Reg.tmp ()
                   val () = print (mkload (stackTop, "%Pointer*", "%stackTop"))
@@ -1644,6 +1647,7 @@ fun emitChunk {context, chunk, outputLL} =
             case transfer of
                Transfer.Arith {args, dst, overflow, prim, success} =>
                   let
+                     val () = print "\t;arithmetic transfer\n"
                      val args = Vector.map (args, operandToValue)
                      val (ty, res_obit) = emitPrimApp {args = args, prim = prim}
                      val resReg = LLVM.Reg.tmp ()
@@ -1780,7 +1784,8 @@ fun emitChunk {context, chunk, outputLL} =
                        "%Word32 = type i32\n",
                        "%Word64 = type i64\n",
                        "%CPointer = type i8*\n",
-                       "%Objptr = type %Pointer\n"]
+                       "%Objptr = type %Pointer\n",
+                       "%BlockId = type i64\n"]
       val () = print "\n"
       (* LLVM Intrinsics *)
       val () = print "; llvm intrinsics\n"
@@ -1862,15 +1867,14 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "\n"
 
       val () = print "\n\n"
-      val () = prints ["define hidden %struct.cont @Chunk", chunkLabelToString chunkLabel, " () {\n"]
+      val () = prints ["define hidden %BlockId @Chunk", chunkLabelToString chunkLabel, " (%uintptr_t %nextBlock) {\n"]
 
       val () = print "\n"
       val () = print "entry:\n"
       val () = print "\t%cont = alloca %struct.cont\n"
       val () = print "\t%l_nextFun = alloca %uintptr_t\n"
       val nextFun = LLVM.Reg.tmp ()
-      val () = print (mkload (nextFun, "%uintptr_t*", "@nextFun"))
-      val () = print (mkstore ("%uintptr_t", nextFun, "%l_nextFun"))
+      val () = print (mkstore ("%uintptr_t", "%nextBlock", "%l_nextFun"))
       val () = print "\t%frontier = alloca %Pointer\n"
       val () = print (cacheFrontier ())
       val () = print "\t%stackTop = alloca %Pointer\n"
@@ -1925,9 +1929,9 @@ fun emitChunk {context, chunk, outputLL} =
       val () = print "exit:\n"
       val () = print (flushFrontier ())
       val () = print (flushStackTop ())
-      val cont = LLVM.Reg.tmp ()
-      val () = print (mkload (cont, "%struct.cont*", "%cont"))
-      val () = prints ["\tret %struct.cont ", cont, "\n"]
+      val nextFun = LLVM.Reg.tmp ()
+      val () = print (mkload (nextFun, "%BlockId*", "%l_nextFun"))
+      val () = prints ["\tret %BlockId ", nextFun, "\n"]
 
       val () = print "\n"
       val () = prints [Label.toString unreachableLabel, ":\n"]
@@ -2062,7 +2066,7 @@ fun emitC {context, outputC} =
     in
         CCodegen.outputDeclarations
             {additionalMainArgs = additionalMainArgs,
-             includes = ["c-main.h"],
+             includes = ["llvm-main.h"],
              print = print,
              program = program,
              rest = rest}
