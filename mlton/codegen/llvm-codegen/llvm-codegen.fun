@@ -1009,21 +1009,12 @@ fun outputTransfer (cxt, transfer, srcChunk) =
                            then concat ["\tbr label %", labelstr, "\n"]
                            else let
                                val comment = "\t; FarJump\n"
-                               (* cont.nextChunk = ChunkN *)
-                               val funcname = "@Chunk" ^ chunkLabelToString dstChunk
-                               val func = LLVM.Reg.tmp ()
-                               val cast = mkconv (func, "bitcast", "%struct.cont ()*", funcname,
-                                                  "i8*")
-                               val nextchunkptr = LLVM.Reg.tmp ()
-                               val gep = mkgep (nextchunkptr, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")])
-                               val storeNCP = mkstore ("i8*", func, nextchunkptr)
-                               val () = addCFunction (concat ["%struct.cont ", funcname, "()"])
                                (* nextFun = l *)
                                val storeNF = mkstore ("%uintptr_t", labelToStringIndex label,
-                                                      "@nextFun")
+                                                      "%l_nextFun")
                                val br = "\tbr label %exit\n"
                            in
-                               concat [comment, cast, gep, storeNCP, storeNF, br]
+                               concat [comment, storeNF, br]
                            end
             in
                 concat [push, goto]
@@ -1906,23 +1897,6 @@ fun emitChunk {context, chunk, outputLL} =
 
       val () = print "\n"
       val () = print "default:\n"
-      val nextFun = LLVM.Reg.tmp ()
-      val () = print (mkload (nextFun, "%uintptr_t*", "%l_nextFun"))
-      val () = print (mkstore ("%uintptr_t", nextFun, "@nextFun"))
-      (* cont.nextChunk = ( void* )nextChunks[nextFun]; *)
-      val nextChunks_nextFun_ptr = LLVM.Reg.tmp ()
-      val () = print (mkgep (nextChunks_nextFun_ptr,
-                             "[0 x %struct.cont () *]*",
-                             "@nextChunks",
-                             [("i32", "0"),
-                              ("%uintptr_t", nextFun)]))
-      val nextChunks_nextFun = LLVM.Reg.tmp ()
-      val () = print (mkload (nextChunks_nextFun, "%struct.cont () * *", nextChunks_nextFun_ptr))
-      val nextChunks_nextFun_bc = LLVM.Reg.tmp ()
-      val () = print (mkconv (nextChunks_nextFun_bc, "bitcast", "%struct.cont () *", nextChunks_nextFun, "i8*"))
-      val cont_nextChunk_ptr = LLVM.Reg.tmp ()
-      val () = print (mkgep (cont_nextChunk_ptr, "%struct.cont*", "%cont", [("i32", "0"), ("i32", "0")]))
-      val () = print (mkstore ("i8*", nextChunks_nextFun_bc, cont_nextChunk_ptr))
       val () = print "\tbr label %exit\n"
 
       val () = print "\n"
