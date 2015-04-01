@@ -94,7 +94,7 @@ fun implementsPrim (p: 'a Prim.t): bool =
        | Real_rndToWord _ => true
        | Real_round _ => true (* Requires LLVM 3.3 to use "llvm.rint" intrinsic *)
        | Real_sub _ => true
-       | Thread_returnToC => false
+       | Thread_returnToC => true
        | Word_add _ => true
        | Word_addCheck _ => true
        | Word_andb _ => true
@@ -1458,9 +1458,15 @@ fun emitChunk {context, chunk, outputLL} =
                   end
              | Real_round rs => doMathCall ("rint", rs)
              | Real_sub _ => doBinAL "fsub"
-             (*
-             | Thread_returnToC => false
-             *)
+             | Thread_returnToC =>
+                let
+                  val () = print "\t; Thread_returnToC\n"
+                  val () = print (mkstore ("i32", "1", "@returnToC"))
+                  (* val () = print ("\tret %BlockId 0") *)
+                  val () = print "\tbr label %exit\n"
+                in
+                  ("", "")
+                end
              | Word_add _ => doBinAL "add"
              | Word_addCheck (ws, {signed}) => doCheckCall (if signed then "sadd" else "uadd", ws)
              | Word_andb _ => doBinAL "and"
