@@ -37,7 +37,7 @@ static void MLton_callFromC () {                                        \
         cont.nextChunk = nextChunks[nextFun];                           \
         returnToC = FALSE;                                              \
         do {                                                            \
-                cont=(*(struct cont(*)(void))cont.nextChunk)();         \
+                nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun); \
         } while (not returnToC);                                        \
         returnToC = FALSE;                                              \
         s->atomicState += 1;                                            \
@@ -64,8 +64,11 @@ PUBLIC int MLton_main (int argc, char* argv[]) {                        \
                 cont.nextChunk = nextChunks[nextFun];                   \
         }                                                               \
         /* Trampoline */                                                \
-        printf("starting trampoline...\n");                             \
         while (1) {                                                     \
+            nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun);     \
+            nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun);     \
+            nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun);     \
+            nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun);     \
             nextFun=((int (*)(int))(nextChunks[nextFun]))(nextFun);     \
         }                                                               \
         return 1;                                                       \
@@ -101,4 +104,4 @@ PUBLIC void LIB_CLOSE(LIBNAME) () {                                     \
         GC_done(&gcState);                                              \
 }
 
-#endif /* #ifndef _C_MAIN_H */
+#
