@@ -1776,7 +1776,7 @@ fun emitChunk {context, chunk, outputLL} =
                        "%Word64 = type i64\n",
                        "%CPointer = type i8*\n",
                        "%Objptr = type %Pointer\n",
-                       "%BlockId = type i64\n"]
+                       "%BlockId = type %uintptr_t\n"]
       val () = print "\n"
       (* LLVM Intrinsics *)
       val () = print "; llvm intrinsics\n"
@@ -1851,7 +1851,6 @@ fun emitChunk {context, chunk, outputLL} =
       (* ??? *)
       val () = print "%struct.cont = type { i8* }\n"
       val () = print "%struct.GC_state = type opaque\n"
-      val () = print "@nextFun = external hidden global %uintptr_t\n"
       val () = print "@returnToC = external hidden global i32\n"
       val () = print "@nextChunks = external hidden global [0 x %struct.cont () *]\n"
       val () = print "@gcState = external hidden global %struct.GC_state\n"
