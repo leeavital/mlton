@@ -6,8 +6,8 @@
  * See the file MLton-LICENSE for details.
  */
 
-#ifndef _C_MAIN_H_
-#define _C_MAIN_H_
+#ifndef _LLVM_MAIN_H_
+#define _LLVM_MAIN_H_
 
 #include "common-main.h"
 #include "c-common.h"
@@ -103,5 +103,4 @@ PUBLIC void LIB_CLOSE(LIBNAME) () {                                     \
         } while (not returnToC);                                        \
         GC_done(&gcState);                                              \
 }
-
-#
+#endif /* #ifndef _LLVM_MAIN_H */
