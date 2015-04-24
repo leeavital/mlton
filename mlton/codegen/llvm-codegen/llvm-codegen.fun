@@ -1581,6 +1581,7 @@ fun emitChunk {context, chunk, outputLL} =
                else ()
             fun push (return: Label.t, size: Bytes.t) =
                let
+                  val () = print "\t;push\n"
                   val () =
                      (emitStatement o Statement.Move)
                      {dst = Operand.stackOffset
@@ -1597,6 +1598,7 @@ fun emitChunk {context, chunk, outputLL} =
                end
             fun doNextViaLabel dstLabel =
                let
+                  val () = prints ["\t; jumping to label ",  Label.toString dstLabel , "\n"]
                   val dstChunkLabel = labelChunk dstLabel
                   val () =
                      if ChunkLabel.equals (chunkLabel, dstChunkLabel)
@@ -1698,12 +1700,14 @@ fun emitChunk {context, chunk, outputLL} =
                   end
              | Transfer.Return =>
                   let
+                     val () = print "\t; return\n"
                      val () = doNextViaStackTop ()
                   in
                      ()
                   end
              | Transfer.Switch (Switch.T {cases, default, test, ...}) =>
                   let
+                     val () = print "; switch transfer\n"
                      val (testTy, testReg) = operandToValue test
                      val defaultLabel =
                         case default of
