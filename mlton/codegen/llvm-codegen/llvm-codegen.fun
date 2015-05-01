@@ -20,6 +20,7 @@ in
    structure GCField = GCField
 end
 
+
 structure Kind =
    struct
       open Kind
@@ -141,6 +142,44 @@ structure LLVM =
             end
          end
    end
+
+structure Debug =
+struct
+  val messages = ref []
+  val i = ref 0
+
+  fun debug (print: string -> unit) (message: string) : unit =
+    let
+      val label = concat ["debug_", Int.toString (!i)]
+      val () = messages := (label, message)::(!messages)
+
+      val () = i := (!i) + 1
+      val sizestr = concat ["[", (Int.toString ((String.length message) + 1)), " x i8]"]
+      val tmp = LLVM.Reg.tmp ()
+      val cast = concat[ "\t", tmp , " =  bitcast ", sizestr, "* @", label, " to i8*\n"]
+      val call = concat ["\tcall i32 @puts(i8* ", tmp, ")\n"]
+    in
+      print cast ; print call
+    end
+
+  fun decls (print: string-> unit) : unit =
+    let 
+      fun decl (label, message) =
+        let
+          val message' = message ^ "\\00"
+          val len = Int.toString( (String.length message) + 1 ) (* one for \0 *)
+        in 
+          concat ["@", label, " = private unnamed_addr constant [", len , " x i8] c\"", message' , "\"\n"]
+        end
+      val declStrings = map decl (!messages)
+      val () = print "; debug declarations\n"
+      val () = print "declare i32 @puts(i8* nocapture) nounwind\n" 
+      val () = print (concat declStrings)
+    in
+      ()
+    end
+
+end
 
 (* LLVM codegen context. Contains various values/functions that should
    be shared amongst all codegen functions. *)
@@ -1733,6 +1772,8 @@ fun emitChunk {context, chunk, outputLL} =
             val () = print "\n"
             val () = prints [Label.toString label, ":\n"]
 
+            val () = Debug.debug print (Label.toString label)
+
             fun pop fi = print ((stackPush o llbytes o Bytes.~ o Program.frameSize) (program, fi))
             val () =
                case kind of
@@ -1942,6 +1983,8 @@ fun emitChunk {context, chunk, outputLL} =
                 in
                    prints ["@", name, " = external ", visibility, " global ", ty, "\n"]
                 end)
+
+      val () = Debug.decls print
 
       val () = done ()
    in
